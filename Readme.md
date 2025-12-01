@@ -13,7 +13,9 @@ Quick start
 3. Copy and edit environment file if present:
     - `copy .env.example .env` (Windows) — update values in `.env`
 4. Run the app (replace with the project's actual command):
-    - `npm start` 
+    - `npm start` | `node index.js`
+5. Server will be running at PORT=3000
+6. use /run-test api to test 
 
 Project layout (example)
 - index.js (main file)
