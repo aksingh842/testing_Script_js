@@ -7,7 +7,7 @@ Purpose
 
 Quick start
 1. Clone or copy the repo:
-    - `git clone https://github.com/Ashishkumar667/test_script`
+    - `git clone https://github.com/Ashishkumar667/test_script.git`
 2. Install dependencies (use the command for the runtime this project uses):
     - Node: `npm install`
 3. Copy and edit environment file if present:
