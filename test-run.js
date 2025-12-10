@@ -9,7 +9,7 @@ dotenv.config();
 // ------------------------
 const REFRESH_URL = "https://gateway-dev.on-demand.io/v1/auth/user/refresh_token";
 const SESSION_CREATE_URL = "https://gateway-dev.on-demand.io/chat/v1/client/sessions";
-const WEBHOOK_URL = "https://webhook.site/86018ebd-22b8-4b81-9f4a-66159c4dbf3f";
+const WEBHOOK_URL = process.env.WEBHOOK_URL || "";
 
 let ACCESS_TOKEN = process.env.ACCESS_TOKEN || "";
 let REFRESH_TOKEN = process.env.REFRESH_TOKEN || "";
@@ -39,227 +39,227 @@ const TEST_CASES = [
   //     "plugin-1722504304", // Email
   //   ],
   // },
-  {
-    name: "Ergonomic Keyboard Review + Sketch",
-    query:
-      "Find best ergonomic keyboard under $120 on Amazon. Then fetch 10 tweets about it, and generate a sketch of ideal layout. Send email to akhielsh21221@gmail.com with all results.",
-    plugins: [
-      "plugin-1716334779", // Amazon Shopping
-      "plugin-1716326559", // Twitter Extractor
-      // "plugin-1745475776", // Image Generation
-      "plugin-1722285968", // Email
-    ],
-  },
   // {
-  //   name: "Remote DE Job + LinkedIn + Tweets + Email",
+  //   name: "Ergonomic Keyboard Review + Sketch",
   //   query:
-  //     "Find a remote data engineer job >$120k. Pull hiring manager LinkedIn headline, extract 10 tweets about their tech stack, and draft a follow-up email. Send email to akhielsh21221@gmail.com.",
-  //   plugins: [
-  //     "plugin-1718116202", // LinkedIn Search
-  //     "plugin-1716326559", // Twitter Extractor
-  //     "plugin-1727033303", // Perplexity
-  //     "plugin-1722504304", // Email
-  //   ],
-  // },
-  {
-    name: "Fortune 500 Sustainability + TikTok + Image + Email",
-    query:
-      "Search LinkedIn for a Head of Sustainability at any Fortune 500 company. Then pull top 3 TikToks tagged #GreenTech and generate a 'Net-Zero Office' image. Send email to akhielsh21221@gmail.com with insights.",
-    plugins: [
-      "plugin-1718116202", // LinkedIn Search
-      // "plugin-1739928801", // TikTok Agent (NEW)
-      "plugin-1745475776", // Image Generation
-      "plugin-1722285968", // Email
-    ],
-  },
-  {
-    name: "Evaluate Best Source for NVDA Today",
-    query:
-      "Decide whether Stock News, Twitter Extractor, or Perplexity is best for evaluating Nvidia today. Justify the choice and continue with analysis.",
-    plugins: [
-      "plugin-1716411313", // Latest News Headlines
-      "plugin-1716326559", // Twitter Extractor
-      "plugin-1722260873", // Perplexity
-    ],
-  },
-  {
-    name: "Netflix Tweets + IG + TA + Email",
-    query:
-      "Pull latest 15 tweets about Netflix pricing, Instagram bio of @netflix, and run a TA check on NFLX. Send email with summary.",
-    plugins: [
-      "plugin-1716326559", // Twitter Extractor
-      // "plugin-1762980461", // Instagram User Info
-      "plugin-1716434059", // US Stock TA
-      "plugin-1722285968", // Email
-    ],
-  },
-  {
-    name: "UAE AI Headlines + Image + Perplexity",
-    query:
-      "Get 5 latest UAE AI research headlines, generate an AI-human handshake image, and provide a 2-line opinion per story using Perplexity.",
-    plugins: [
-      "plugin-1716107632", // UAE Latest News
-      // "plugin-1745475776", // Image Generation
-      "plugin-1722260873", // Perplexity
-    ],
-  },
-  {
-    name: "#DubaiExpo Tweets + TikTok + Perplexity + Email",
-    query:
-      "Pull 20 tweets about #DubaiExpo, top TikTok with same tag, and use Perplexity to summarize its economic impact. Send email with full digest.",
-    plugins: [
-      "plugin-1716326559", // Twitter Extractor
-      // "plugin-1739928801", // TikTok Agent
-      "plugin-1722260873", // Perplexity
-      "plugin-1722285968", // Email
-    ],
-  },
-  {
-    name: "Bitcoin + MSTR + TA + Email",
-    query:
-      "Get Bitcoin’s current price & 24-h change, latest MicroStrategy headline, and RSI/MACD for MSTR. Send email with report.",
-    plugins: [
-      "plugin-1715808194", // Coinmarketcap
-      "plugin-1716411313", // News Headlines
-      "plugin-1716434059", // Stock TA
-      "plugin-1722285968", // Email
-    ],
-  },
-  {
-    name: "UAE Crypto Regulations + Summary + Image + Email",
-    query:
-      "Pull latest 3 UAE crypto regulations, summarize each via Perplexity, and generate an image representing 'Dubai FinTech boom'. Send email with report.",
-    plugins: [
-      "plugin-1716107632", // UAE News
-      "plugin-1722260873", // Perplexity
-      // "plugin-1745475776", // Image Generation
-      "plugin-1722285968", // Email
-    ],
-  },
-  {
-    name: "Standing Desk Amazon + TikTok + Email",
-    query:
-      "Find a top-rated $300 standing desk on Amazon, then check TikTok views for unboxings and fetch latest pricing. Email results.",
-    plugins: [
-      "plugin-1716334779", // Amazon Shopping
-      // "plugin-1716372717", // TikTok Agent
-      "plugin-1722285968", // Email
-    ],
-  },
-  // {
-  //   name: "PM SaaS Job + LinkedIn + Post + Image + Email",
-  //   query:
-  //     "Find a remote Product Manager SaaS job, extract firm’s latest LinkedIn post headline, and generate a motivational desk-setup image. Email results.",
-  //   plugins: [
-  //     "plugin-1718116202", // LinkedIn Search
-  //     "plugin-1730662083", // LinkedIn Post
-  //     "plugin-1745475776", // Image Generation
-  //     "plugin-1722504304", // Email
-  //   ],
-  // },
-  {
-    name: "Cybersecurity Job SG + LinkedIn + Perplexity + Email",
-    query:
-      "Search for a cybersecurity job in Singapore, pull recruiter’s LinkedIn headline, and ask Perplexity for top 3 interview questions. Email notes.",
-    plugins: [
-      "plugin-1718116202", // LinkedIn Search
-      "plugin-1722260873", // Perplexity
-      "plugin-1722285968", // Email
-    ],
-  },
-  // {
-  //   name: "Mechanical Keyboard Selection (JSON Output)",
-  //   query:
-  //     "Search for top-rated mechanical keyboards under $100. Think in steps: 1) Filter, 2) Compare, 3) Choose. Output reasoning trace JSON.",
-  //   plugins: ["plugin-1716334779"], // Amazon Shopping
-  // },
-  // {
-  //   name: "Forex + Gold + Email",
-  //   query:
-  //     "Pull today’s USD/EUR exchange rate and compare it with Gold price trend. Email a one-line hedging strategy summary.",
-  //   plugins: [
-  //     "plugin-1747245039", // Forex
-  //     "plugin-1716640959", // Commodities
-  //     "plugin-1722504304", // Email
-  //   ],
-  // },
-  {
-    name: "ETH + COIN TA + Email",
-    query:
-      "Get Ethereum’s price from Coinmarketcap and run RSI/MACD for Coinbase (COIN). Email final stance.",
-    plugins: [
-      "plugin-1715808194", // Coinmarketcap
-      "plugin-1716434059", // Stock TA
-      "plugin-1722285968", // Email
-    ],
-  },
-  // {
-  //   name: "Tesla LinkedIn Post + News + Email",
-  //   query:
-  //     "Find the latest LinkedIn post from Tesla, then pull 3 news headlines. Email brand sentiment check.",
-  //   plugins: [
-  //     "plugin-1730662083", // LinkedIn Post
-  //     "plugin-1716411313", // News
-  //     "plugin-1722504304", // Email
-  //   ],
-  // },
-  // {
-  //   name: "Headphones Comparison + Infographic",
-  //   query:
-  //     "Search Amazon for best-rated noise-cancelling headphones under $200, then generate a product comparison infographic image.",
+  //     "Find best ergonomic keyboard under $120 on Amazon. Then fetch 10 tweets about it, and generate a sketch of ideal layout. Send email to akhielsh21221@gmail.com with all results.",
   //   plugins: [
   //     "plugin-1716334779", // Amazon Shopping
-  //     "plugin-1745475776", // Image Generation
+  //     "plugin-1716326559", // Twitter Extractor
+  //     // "plugin-1745475776", // Image Generation
+  //     "plugin-1722285968", // Email
   //   ],
   // },
+  // // {
+  // //   name: "Remote DE Job + LinkedIn + Tweets + Email",
+  // //   query:
+  // //     "Find a remote data engineer job >$120k. Pull hiring manager LinkedIn headline, extract 10 tweets about their tech stack, and draft a follow-up email. Send email to akhielsh21221@gmail.com.",
+  // //   plugins: [
+  // //     "plugin-1718116202", // LinkedIn Search
+  // //     "plugin-1716326559", // Twitter Extractor
+  // //     "plugin-1727033303", // Perplexity
+  // //     "plugin-1722504304", // Email
+  // //   ],
+  // // },
+  // {
+  //   name: "Fortune 500 Sustainability + TikTok + Image + Email",
+  //   query:
+  //     "Search LinkedIn for a Head of Sustainability at any Fortune 500 company. Then pull top 3 TikToks tagged #GreenTech and generate a 'Net-Zero Office' image. Send email to akhielsh21221@gmail.com with insights.",
+  //   plugins: [
+  //     "plugin-1718116202", // LinkedIn Search
+  //     // "plugin-1739928801", // TikTok Agent (NEW)
+  //     "plugin-1745475776", // Image Generation
+  //     "plugin-1722285968", // Email
+  //   ],
+  // },
+  // {
+  //   name: "Evaluate Best Source for NVDA Today",
+  //   query:
+  //     "Decide whether Stock News, Twitter Extractor, or Perplexity is best for evaluating Nvidia today. Justify the choice and continue with analysis.",
+  //   plugins: [
+  //     "plugin-1716411313", // Latest News Headlines
+  //     "plugin-1716326559", // Twitter Extractor
+  //     "plugin-1722260873", // Perplexity
+  //   ],
+  // },
+  // {
+  //   name: "Netflix Tweets + IG + TA + Email",
+  //   query:
+  //     "Pull latest 15 tweets about Netflix pricing, Instagram bio of @netflix, and run a TA check on NFLX. Send email with summary.",
+  //   plugins: [
+  //     "plugin-1716326559", // Twitter Extractor
+  //     // "plugin-1762980461", // Instagram User Info
+  //     "plugin-1716434059", // US Stock TA
+  //     "plugin-1722285968", // Email
+  //   ],
+  // },
+  // {
+  //   name: "UAE AI Headlines + Image + Perplexity",
+  //   query:
+  //     "Get 5 latest UAE AI research headlines, generate an AI-human handshake image, and provide a 2-line opinion per story using Perplexity.",
+  //   plugins: [
+  //     "plugin-1716107632", // UAE Latest News
+  //     // "plugin-1745475776", // Image Generation
+  //     "plugin-1722260873", // Perplexity
+  //   ],
+  // },
+  // {
+  //   name: "#DubaiExpo Tweets + TikTok + Perplexity + Email",
+  //   query:
+  //     "Pull 20 tweets about #DubaiExpo, top TikTok with same tag, and use Perplexity to summarize its economic impact. Send email with full digest.",
+  //   plugins: [
+  //     "plugin-1716326559", // Twitter Extractor
+  //     // "plugin-1739928801", // TikTok Agent
+  //     "plugin-1722260873", // Perplexity
+  //     "plugin-1722285968", // Email
+  //   ],
+  // },
+  // {
+  //   name: "Bitcoin + MSTR + TA + Email",
+  //   query:
+  //     "Get Bitcoin’s current price & 24-h change, latest MicroStrategy headline, and RSI/MACD for MSTR. Send email with report.",
+  //   plugins: [
+  //     "plugin-1715808194", // Coinmarketcap
+  //     "plugin-1716411313", // News Headlines
+  //     "plugin-1716434059", // Stock TA
+  //     "plugin-1722285968", // Email
+  //   ],
+  // },
+  // {
+  //   name: "UAE Crypto Regulations + Summary + Image + Email",
+  //   query:
+  //     "Pull latest 3 UAE crypto regulations, summarize each via Perplexity, and generate an image representing 'Dubai FinTech boom'. Send email with report.",
+  //   plugins: [
+  //     "plugin-1716107632", // UAE News
+  //     "plugin-1722260873", // Perplexity
+  //     // "plugin-1745475776", // Image Generation
+  //     "plugin-1722285968", // Email
+  //   ],
+  // },
+  // {
+  //   name: "Standing Desk Amazon + TikTok + Email",
+  //   query:
+  //     "Find a top-rated $300 standing desk on Amazon, then check TikTok views for unboxings and fetch latest pricing. Email results.",
+  //   plugins: [
+  //     "plugin-1716334779", // Amazon Shopping
+  //     // "plugin-1716372717", // TikTok Agent
+  //     "plugin-1722285968", // Email
+  //   ],
+  // },
+  // // {
+  // //   name: "PM SaaS Job + LinkedIn + Post + Image + Email",
+  // //   query:
+  // //     "Find a remote Product Manager SaaS job, extract firm’s latest LinkedIn post headline, and generate a motivational desk-setup image. Email results.",
+  // //   plugins: [
+  // //     "plugin-1718116202", // LinkedIn Search
+  // //     "plugin-1730662083", // LinkedIn Post
+  // //     "plugin-1745475776", // Image Generation
+  // //     "plugin-1722504304", // Email
+  // //   ],
+  // // },
+  // {
+  //   name: "Cybersecurity Job SG + LinkedIn + Perplexity + Email",
+  //   query:
+  //     "Search for a cybersecurity job in Singapore, pull recruiter’s LinkedIn headline, and ask Perplexity for top 3 interview questions. Email notes.",
+  //   plugins: [
+  //     "plugin-1718116202", // LinkedIn Search
+  //     "plugin-1722260873", // Perplexity
+  //     "plugin-1722285968", // Email
+  //   ],
+  // },
+  // // {
+  // //   name: "Mechanical Keyboard Selection (JSON Output)",
+  // //   query:
+  // //     "Search for top-rated mechanical keyboards under $100. Think in steps: 1) Filter, 2) Compare, 3) Choose. Output reasoning trace JSON.",
+  // //   plugins: ["plugin-1716334779"], // Amazon Shopping
+  // // },
+  // // {
+  // //   name: "Forex + Gold + Email",
+  // //   query:
+  // //     "Pull today’s USD/EUR exchange rate and compare it with Gold price trend. Email a one-line hedging strategy summary.",
+  // //   plugins: [
+  // //     "plugin-1747245039", // Forex
+  // //     "plugin-1716640959", // Commodities
+  // //     "plugin-1722504304", // Email
+  // //   ],
+  // // },
+  // {
+  //   name: "ETH + COIN TA + Email",
+  //   query:
+  //     "Get Ethereum’s price from Coinmarketcap and run RSI/MACD for Coinbase (COIN). Email final stance.",
+  //   plugins: [
+  //     "plugin-1715808194", // Coinmarketcap
+  //     "plugin-1716434059", // Stock TA
+  //     "plugin-1722285968", // Email
+  //   ],
+  // },
+  // // {
+  // //   name: "Tesla LinkedIn Post + News + Email",
+  // //   query:
+  // //     "Find the latest LinkedIn post from Tesla, then pull 3 news headlines. Email brand sentiment check.",
+  // //   plugins: [
+  // //     "plugin-1730662083", // LinkedIn Post
+  // //     "plugin-1716411313", // News
+  // //     "plugin-1722504304", // Email
+  // //   ],
+  // // },
   {
-    name: "HubSpot CRM + Email",
+    name: "Headphones Comparison + Infographic",
     query:
-      "Fetch 5 recent HubSpot CRM contacts and draft a custom outreach email for each, with company background summary. Email result.",
+      "Search Amazon for best-rated noise-cancelling headphones under $200, then generate a product comparison infographic image.",
     plugins: [
-      "plugin-1750083538", // HubSpot CRM
-      "plugin-1722285968", // Email
+      "plugin-1716334779", // Amazon Shopping
+      "plugin-1756825179", // Image Generation
     ],
-  },
-  {
-    name: "UAE AI PDF Report",
-    query:
-      "Get the 5 latest UAE AI headlines and generate a PDF summary.",
-    plugins: [
-      "plugin-1716107632", // UAE News
-      "plugin-1739264368", // PDF generator
-    ],
-  },
-  {
-    name: "AAPL TA + USD/JPY + Email",
-    query:
-      "Check RSI/MACD for Apple (AAPL) and today’s USD/JPY rate. Email macro-trade insight.",
-    plugins: [
-      "plugin-1716434059", // TA
-      "plugin-1747245039", // Forex
-      "plugin-1722285968", // Email
-    ],
-  },
-  {
-    name: "Office Chairs + Tweets + Email",
-    query:
-      "Find top-rated office chairs under $250, then fetch 10 tweets mentioning those products. Email summary.",
-    plugins: [
-      "plugin-1716334779", // Amazon
-      "plugin-1716326559", // Twitter Extractor
-      "plugin-1722285968", // Email
-    ],
-  },
-  {
-    name: "Bitcoin vs Wall Street Image",
-    query:
-      "Fetch Bitcoin price, 3 latest BTC headlines, and generate 'Bitcoin vs Wall Street' image.",
-    plugins: [
-      "plugin-1715808194", // Coinmarketcap
-      "plugin-1716411313", // News
-      "plugin-1745475776", // Image
-    ],
-  },
+  }
+  // {
+  //   name: "HubSpot CRM + Email",
+  //   query:
+  //     "Fetch 5 recent HubSpot CRM contacts and draft a custom outreach email for each, with company background summary. Email result.",
+  //   plugins: [
+  //     "plugin-1750083538", // HubSpot CRM
+  //     "plugin-1722285968", // Email
+  //   ],
+  // },
+  // {
+  //   name: "UAE AI PDF Report",
+  //   query:
+  //     "Get the 5 latest UAE AI headlines and generate a PDF summary.",
+  //   plugins: [
+  //     "plugin-1716107632", // UAE News
+  //     "plugin-1739264368", // PDF generator
+  //   ],
+  // },
+  // {
+  //   name: "AAPL TA + USD/JPY + Email",
+  //   query:
+  //     "Check RSI/MACD for Apple (AAPL) and today’s USD/JPY rate. Email macro-trade insight.",
+  //   plugins: [
+  //     "plugin-1716434059", // TA
+  //     "plugin-1747245039", // Forex
+  //     "plugin-1722285968", // Email
+  //   ],
+  // },
+  // {
+  //   name: "Office Chairs + Tweets + Email",
+  //   query:
+  //     "Find top-rated office chairs under $250, then fetch 10 tweets mentioning those products. Email summary.",
+  //   plugins: [
+  //     "plugin-1716334779", // Amazon
+  //     "plugin-1716326559", // Twitter Extractor
+  //     "plugin-1722285968", // Email
+  //   ],
+  // },
+  // {
+  //   name: "Bitcoin vs Wall Street Image",
+  //   query:
+  //     "Fetch Bitcoin price, 3 latest BTC headlines, and generate 'Bitcoin vs Wall Street' image.",
+  //   plugins: [
+  //     "plugin-1715808194", // Coinmarketcap
+  //     "plugin-1716411313", // News
+  //     "plugin-1745475776", // Image
+  //   ],
+  // },
   // {
   //   name: "YouTube + News + PDF",
   //   query:
@@ -308,6 +308,37 @@ async function refreshToken() {
   } catch (e) {
     console.error("❌ Token refresh failed:", e.response?.data || e.message);
     return false;
+  }
+}
+
+// ---------------- FETCH PLUGIN STATS ----------------
+async function fetchPluginStats(sessionId, messageId) {
+  const PLUGIN_STATS_URL = "https://gateway-dev.on-demand.io/analytic/v1/admin/pluginexecutestats";
+
+  try {
+    console.log(`\n📊 Fetching plugin latency stats...`);
+    const response = await axios.get(PLUGIN_STATS_URL, {
+      params: {
+        sessionId,
+        messageId,
+        companyId: COMPANY_ID
+      },
+      headers: {
+        Authorization: `Bearer ${ACCESS_TOKEN}`,
+        "x-company-id": COMPANY_ID
+      }
+    });
+
+    if (response.data?.data && response.data.data.length > 0) {
+      console.log(`✅ Found ${response.data.data.length} plugin execution(s)`);
+      return response.data.data;
+    }
+
+    console.log("ℹ️ No plugin stats available yet");
+    return [];
+  } catch (err) {
+    console.error("⚠️ Failed to fetch plugin stats:", err.response?.data || err.message);
+    return [];
   }
 }
 
@@ -407,7 +438,45 @@ async function runTestCase(test, index) {
   try {
     response = await sendStream(sessionId, payload);
   } catch (err) {
-    console.error("❌ Request failed:", err.response?.data || err.message);
+    console.error("❌ Request failed:", err.message);
+
+    // Try to read the error response body if it exists
+    if (err.response?.data) {
+      try {
+        let errorBody = '';
+
+        // Check if data is a stream or already a string/object
+        if (typeof err.response.data === 'object' && err.response.data.read) {
+          // It's a stream, read it
+          err.response.data.on('data', chunk => {
+            errorBody += chunk.toString();
+          });
+
+          await new Promise((resolve) => {
+            err.response.data.on('end', () => {
+              console.error("📄 Error response body:", errorBody);
+              try {
+                const parsed = JSON.parse(errorBody);
+                console.error("🔍 Parsed error:", JSON.stringify(parsed, null, 2));
+              } catch (e) {
+                // Not JSON, already printed raw
+              }
+              resolve();
+            });
+          });
+        } else {
+          // Already parsed
+          console.error("📄 Error response:", JSON.stringify(err.response.data, null, 2));
+        }
+      } catch (readErr) {
+        console.error("⚠️ Could not read error body:", readErr.message);
+      }
+    }
+
+    if (err.response?.status) {
+      console.error("📊 Status code:", err.response.status);
+    }
+
     return;
   }
 
@@ -500,7 +569,7 @@ return new Promise((resolve) => {
 
   response.data.on("end", async () => {
     clearTimeout(streamTimeout);
-    
+
     // Process any remaining data in buffer
     if (dataBuffer.trim()) {
       const lines = dataBuffer.split('\n');
@@ -509,7 +578,7 @@ return new Promise((resolve) => {
           try {
             const jsonStr = line.replace(/^data:/, '').trim();
             const parsed = JSON.parse(jsonStr);
-            
+
             if (parsed.publicMetrics && allMetrics.length === 0) {
               const metricData = {
                 eventType: parsed.eventType,
@@ -526,8 +595,22 @@ return new Promise((resolve) => {
         }
       }
     }
-    
+
     console.log(`\n\n✅ Completed: ${test.name}`);
+
+    // Fetch plugin latency stats
+    let pluginStats = [];
+    if (allMetrics.length > 0 && allMetrics[0].messageId) {
+      pluginStats = await fetchPluginStats(sessionId, allMetrics[0].messageId);
+
+      // Log plugin latencies
+      if (pluginStats.length > 0) {
+        console.log("\n⏱️  Plugin Latencies:");
+        pluginStats.forEach(stat => {
+          console.log(`  - ${stat.pluginId}: ${stat.latencyMs}ms (${stat.success ? '✅' : '❌'})`);
+        });
+      }
+    }
 
     // webhook
     try {
@@ -536,7 +619,8 @@ return new Promise((resolve) => {
         sessionId,
         response: fullResponse,
         answer: finalAnswer,
-        metrics: allMetrics
+        metrics: allMetrics,
+        pluginStats: pluginStats
       });
       console.log("📤 Webhook sent");
     } catch (err) {
@@ -547,16 +631,34 @@ return new Promise((resolve) => {
     if (allMetrics.length > 0) {
       const safeName = test.name.replace(/[^\w\-]+/g, "_");
 
-      const csv = new Parser().parse(
-        allMetrics.map((m) => ({
+      // Combine metrics with plugin stats
+      const csvData = allMetrics.map((m) => {
+        const row = {
           testName: test.name,
           timestamp: new Date().toISOString(),
           sessionId,
           answer: finalAnswer,
           ...m
-        }))
-      );
+        };
 
+        // Add plugin latencies as separate columns
+        if (pluginStats.length > 0) {
+          let totalPluginLatency = 0;
+          pluginStats.forEach((stat, idx) => {
+            row[`plugin_${idx + 1}_id`] = stat.pluginId;
+            row[`plugin_${idx + 1}_latency_ms`] = stat.latencyMs;
+            row[`plugin_${idx + 1}_success`] = stat.success;
+            row[`plugin_${idx + 1}_stage`] = stat.stage;
+            row[`plugin_${idx + 1}_executed_at`] = stat.executedAt;
+            totalPluginLatency += stat.latencyMs || 0;
+          });
+          row['total_plugin_latency_ms'] = totalPluginLatency;
+        }
+
+        return row;
+      });
+
+      const csv = new Parser().parse(csvData);
       const file = `metrics_${index + 1}_${safeName}.csv`;
       fs.writeFileSync(file, csv);
       console.log("📁 Saved metrics to:", file);
