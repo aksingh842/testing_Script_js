@@ -203,33 +203,33 @@ const TEST_CASES = [
   // //     "plugin-1722504304", // Email
   // //   ],
   // // },
-  {
-    name: "Headphones Comparison + Infographic",
-    query:
-      "Search Amazon for best-rated noise-cancelling headphones under $200, then generate a product comparison infographic image.",
-    plugins: [
-      "plugin-1716334779", // Amazon Shopping
-      "plugin-1756825179", // Image Generation
-    ],
-  }
+  // {
+  //   name: "Headphones Comparison + Infographic",
+  //   query:
+  //     "Search Amazon for best-rated noise-cancelling headphones under $200, then generate a product comparison infographic image.",
+  //   plugins: [
+  //     "plugin-1716334779", // Amazon Shopping
+  //     "plugin-1756825179", // Image Generation
+  //   ],
+  // },
   // {
   //   name: "HubSpot CRM + Email",
   //   query:
   //     "Fetch 5 recent HubSpot CRM contacts and draft a custom outreach email for each, with company background summary. Email result.",
   //   plugins: [
-  //     "plugin-1750083538", // HubSpot CRM
+  //     "plugin-1719556333", // HubSpot CRM
   //     "plugin-1722285968", // Email
   //   ],
-  // },
-  // {
-  //   name: "UAE AI PDF Report",
-  //   query:
-  //     "Get the 5 latest UAE AI headlines and generate a PDF summary.",
-  //   plugins: [
-  //     "plugin-1716107632", // UAE News
-  //     "plugin-1739264368", // PDF generator
-  //   ],
-  // },
+  // }
+  {
+    name: "UAE AI PDF Report",
+    query:
+      "Get the 5 latest UAE AI headlines and generate a PDF summary.",
+    plugins: [
+      "plugin-1716107632", // UAE News
+      "plugin-1739264368", // PDF generator
+    ],
+  }
   // {
   //   name: "AAPL TA + USD/JPY + Email",
   //   query:
@@ -629,7 +629,8 @@ return new Promise((resolve) => {
 
     // Save metrics to CSV
     if (allMetrics.length > 0) {
-      const safeName = test.name.replace(/[^\w\-]+/g, "_");
+      const csvFile = 'result.csv';
+      const fileExists = fs.existsSync(csvFile);
 
       // Combine metrics with plugin stats
       const csvData = allMetrics.map((m) => {
@@ -643,25 +644,40 @@ return new Promise((resolve) => {
 
         // Add plugin latencies as separate columns
         if (pluginStats.length > 0) {
-          let totalPluginLatency = 0;
+          let totalPluginLatencyMs = 0;
           pluginStats.forEach((stat, idx) => {
+            const latencySec = (stat.latencyMs || 0) / 1000;
             row[`plugin_${idx + 1}_id`] = stat.pluginId;
-            row[`plugin_${idx + 1}_latency_ms`] = stat.latencyMs;
+            row[`plugin_${idx + 1}_latency_s`] = latencySec;
             row[`plugin_${idx + 1}_success`] = stat.success;
             row[`plugin_${idx + 1}_stage`] = stat.stage;
             row[`plugin_${idx + 1}_executed_at`] = stat.executedAt;
-            totalPluginLatency += stat.latencyMs || 0;
+            totalPluginLatencyMs += stat.latencyMs || 0;
           });
-          row['total_plugin_latency_ms'] = totalPluginLatency;
+          const totalPluginLatencySec = totalPluginLatencyMs / 1000;
+          row['total_plugin_latency_s'] = totalPluginLatencySec;
+
+          // Calculate total time minus plugin latency
+          const totalTimeSec = m.totalTimeSec || 0;
+          row['total_time_minus_plugin_latency_s'] = totalTimeSec - totalPluginLatencySec;
         }
 
         return row;
       });
 
       const csv = new Parser().parse(csvData);
-      const file = `metrics_${index + 1}_${safeName}.csv`;
-      fs.writeFileSync(file, csv);
-      console.log("📁 Saved metrics to:", file);
+
+      // Append to result.csv (or create if doesn't exist)
+      if (fileExists) {
+        // File exists, append without header
+        const csvWithoutHeader = csv.split('\n').slice(1).join('\n');
+        fs.appendFileSync(csvFile, '\n' + csvWithoutHeader);
+      } else {
+        // File doesn't exist, write with header
+        fs.writeFileSync(csvFile, csv);
+      }
+
+      console.log(`📁 Saved metrics to: ${csvFile}`);
       console.log(`📝 Answer length: ${finalAnswer.length} characters`);
     } else {
       console.log("ℹ️ No metrics found for:", test.name);
