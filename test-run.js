@@ -1,6 +1,7 @@
 const axios = require("axios");
 const fs = require("fs");
 const { Parser } = require("json2csv");
+const { spawn } = require("child_process");
 const dotenv = require("dotenv");
 dotenv.config();
 
@@ -14,6 +15,10 @@ const WEBHOOK_URL = process.env.WEBHOOK_URL || "";
 let ACCESS_TOKEN = process.env.ACCESS_TOKEN || "";
 let REFRESH_TOKEN = process.env.REFRESH_TOKEN || "";
 let COMPANY_ID = process.env.COMPANY_ID || "";
+
+// Model Monitoring Configuration
+const MODEL_TYPE = process.env.MODEL_TYPE || "api"; // "onprem" or "api"
+const MODEL_PROCESS_NAME = process.env.MODEL_PROCESS_NAME || "python";
 
 // ------------------------
 // TEST CASES
@@ -203,15 +208,15 @@ const TEST_CASES = [
   // //     "plugin-1722504304", // Email
   // //   ],
   // // },
-  // {
-  //   name: "Headphones Comparison + Infographic",
-  //   query:
-  //     "Search Amazon for best-rated noise-cancelling headphones under $200, then generate a product comparison infographic image.",
-  //   plugins: [
-  //     "plugin-1716334779", // Amazon Shopping
-  //     "plugin-1756825179", // Image Generation
-  //   ],
-  // },
+  {
+    name: "Headphones Comparison + Infographic",
+    query:
+      "Search Amazon for best-rated noise-cancelling headphones under $200, then generate a product comparison infographic image.",
+    plugins: [
+      "plugin-1716334779", // Amazon Shopping
+      "plugin-1756825179", // Image Generation
+    ],
+  },
   // {
   //   name: "HubSpot CRM + Email",
   //   query:
@@ -221,15 +226,15 @@ const TEST_CASES = [
   //     "plugin-1722285968", // Email
   //   ],
   // }
-  {
-    name: "UAE AI PDF Report",
-    query:
-      "Get the 5 latest UAE AI headlines and generate a PDF summary.",
-    plugins: [
-      "plugin-1716107632", // UAE News
-      "plugin-1739264368", // PDF generator
-    ],
-  }
+  // {
+  //   name: "UAE AI PDF Report",
+  //   query:
+  //     "Get the 5 latest UAE AI headlines and generate a PDF summary.",
+  //   plugins: [
+  //     "plugin-1716107632", // UAE News
+  //     "plugin-1739264368", // PDF generator
+  //   ],
+  // }
   // {
   //   name: "AAPL TA + USD/JPY + Email",
   //   query:
@@ -693,14 +698,76 @@ return new Promise((resolve) => {
 async function runAllTests() {
   console.log("\n🎯 Starting Test Suite");
   console.log(`Company: ${COMPANY_ID}`);
+  console.log(`Model Type: ${MODEL_TYPE}`);
   console.log(`Total Tests: ${TEST_CASES.length}`);
 
-  for (let i = 0; i < TEST_CASES.length; i++) {
-    await runTestCase(TEST_CASES[i], i);
+  let monitorProcess = null;
 
-    if (i < TEST_CASES.length - 1) {
-      console.log("\n⏳ Waiting 2 sec...");
-      await new Promise((r) => setTimeout(r, 2000));
+  // Start system monitoring if MODEL_TYPE is "onprem"
+  if (MODEL_TYPE.toLowerCase() === "onprem") {
+    console.log("\n📊 Starting System Resource Monitor...");
+    console.log(`   Target Process: ${MODEL_PROCESS_NAME}`);
+    console.log(`   Metrics File: system_metrics.csv`);
+
+    monitorProcess = spawn("python3", [
+      "monitor.py",
+      MODEL_PROCESS_NAME,
+      "--out",
+      "system_metrics.csv",
+      "--interval",
+      "0.5"
+    ]);
+
+    monitorProcess.stdout.on('data', (data) => {
+      console.log(`[Monitor]: ${data.toString().trim()}`);
+    });
+
+    monitorProcess.stderr.on('data', (data) => {
+      console.error(`[Monitor Error]: ${data.toString().trim()}`);
+    });
+
+    monitorProcess.on('error', (err) => {
+      console.error(`[Monitor Process Error]: ${err.message}`);
+    });
+
+    // Allow monitor to initialize
+    console.log("⏳ Waiting for monitor to initialize...");
+    await new Promise((r) => setTimeout(r, 2000));
+  } else {
+    console.log(`\n⏭️  Skipping system monitoring (MODEL_TYPE=${MODEL_TYPE})`);
+  }
+
+  try {
+    for (let i = 0; i < TEST_CASES.length; i++) {
+      await runTestCase(TEST_CASES[i], i);
+
+      if (i < TEST_CASES.length - 1) {
+        console.log("\n⏳ Waiting 2 sec...");
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+  } finally {
+    // Stop monitoring if it was started
+    if (monitorProcess) {
+      console.log("\n🛑 Stopping System Resource Monitor...");
+      monitorProcess.kill("SIGINT");
+
+      // Wait for graceful shutdown
+      await new Promise((resolve) => {
+        monitorProcess.on('exit', () => {
+          console.log("✅ Monitor stopped successfully");
+          resolve();
+        });
+
+        // Force kill after 3 seconds if not stopped
+        setTimeout(() => {
+          if (!monitorProcess.killed) {
+            monitorProcess.kill("SIGKILL");
+            console.log("⚠️ Monitor force-stopped");
+          }
+          resolve();
+        }, 3000);
+      });
     }
   }
 
