@@ -347,6 +347,43 @@ async function fetchPluginStats(sessionId, messageId) {
   }
 }
 
+// ---------------- FETCH CHAT STATS (RAG & FULFILLMENT) ----------------
+async function fetchChatStats(sessionId, messageId, chatType) {
+  const CHAT_STATS_URL = "https://gateway-dev.on-demand.io/analytic/v1/admin/chatStats/filter";
+
+  try {
+    console.log(`\n📈 Fetching ${chatType} chat stats...`);
+    const response = await axios.get(CHAT_STATS_URL, {
+      params: {
+        sessionId,
+        messageId,
+        companyId: COMPANY_ID,
+        chatType
+      },
+      headers: {
+        Authorization: `Bearer ${ACCESS_TOKEN}`,
+        "x-company-id": COMPANY_ID
+      }
+    });
+
+    if (response.data?.data && response.data.data.length > 0) {
+      const stats = response.data.data[0];
+      console.log(`✅ ${chatType} stats:`, {
+        inputTokens: stats.inputTokens,
+        outputTokens: stats.outputTokens,
+        totalTimeSec: stats.totalTimeSec
+      });
+      return stats;
+    }
+
+    console.log(`ℹ️ No ${chatType} stats available`);
+    return null;
+  } catch (err) {
+    console.error(`⚠️ Failed to fetch ${chatType} stats:`, err.response?.data || err.message);
+    return null;
+  }
+}
+
 // ---------------- CREATE SESSION ----------------
 async function createSession() {
   try {
@@ -605,8 +642,14 @@ return new Promise((resolve) => {
 
     // Fetch plugin latency stats
     let pluginStats = [];
+    let ragStats = null;
+    let fulfillmentStats = null;
+
     if (allMetrics.length > 0 && allMetrics[0].messageId) {
-      pluginStats = await fetchPluginStats(sessionId, allMetrics[0].messageId);
+      const messageId = allMetrics[0].messageId;
+
+      // Fetch plugin stats
+      pluginStats = await fetchPluginStats(sessionId, messageId);
 
       // Log plugin latencies
       if (pluginStats.length > 0) {
@@ -615,6 +658,10 @@ return new Promise((resolve) => {
           console.log(`  - ${stat.pluginId}: ${stat.latencyMs}ms (${stat.success ? '✅' : '❌'})`);
         });
       }
+
+      // Fetch RAG and Fulfillment token stats
+      ragStats = await fetchChatStats(sessionId, messageId, "rag_completed");
+      fulfillmentStats = await fetchChatStats(sessionId, messageId, "fulfillment_completed");
     }
 
     // webhook
@@ -625,7 +672,9 @@ return new Promise((resolve) => {
         response: fullResponse,
         answer: finalAnswer,
         metrics: allMetrics,
-        pluginStats: pluginStats
+        pluginStats: pluginStats,
+        ragStats: ragStats,
+        fulfillmentStats: fulfillmentStats
       });
       console.log("📤 Webhook sent");
     } catch (err) {
@@ -637,19 +686,59 @@ return new Promise((resolve) => {
       const csvFile = 'result.csv';
       const fileExists = fs.existsSync(csvFile);
 
-      // Combine metrics with plugin stats
+      // Combine metrics with plugin stats, RAG stats, and fulfillment stats
       const csvData = allMetrics.map((m) => {
+        // Calculate plugin latency first
+        let totalPluginLatencySec = 0;
+        if (pluginStats.length > 0) {
+          const totalPluginLatencyMs = pluginStats.reduce((sum, stat) => sum + (stat.latencyMs || 0), 0);
+          totalPluginLatencySec = totalPluginLatencyMs / 1000;
+        }
+
+        const ragTimeSec = ragStats?.totalTimeSec || 0;
+        const fulfillmentTimeSec = fulfillmentStats?.totalTimeSec || 0;
+        const totalTime = ragTimeSec + fulfillmentTimeSec;
+
         const row = {
           testName: test.name,
           timestamp: new Date().toISOString(),
           sessionId,
+          messageId: m.messageId,
           answer: finalAnswer,
-          ...m
+
+          // RAG-specific metrics
+          rag_inputTokens: ragStats?.inputTokens || 0,
+          rag_outputTokens: ragStats?.outputTokens || 0,
+          rag_totalTokens: (ragStats?.inputTokens || 0) + (ragStats?.outputTokens || 0),
+          rag_totalTimeSec: ragTimeSec,
+          rag_endpointId: ragStats?.endpointId || '',
+          rag_reasoningMode: ragStats?.reasoningMode || '',
+
+          // Fulfillment-specific metrics
+          fulfillment_inputTokens: fulfillmentStats?.inputTokens || 0,
+          fulfillment_outputTokens: fulfillmentStats?.outputTokens || 0,
+          fulfillment_totalTokens: (fulfillmentStats?.inputTokens || 0) + (fulfillmentStats?.outputTokens || 0),
+          fulfillment_totalTimeSec: fulfillmentTimeSec,
+          fulfillment_endpointId: fulfillmentStats?.endpointId || '',
+
+          // Combined totals
+          total_inputTokens: (ragStats?.inputTokens || 0) + (fulfillmentStats?.inputTokens || 0),
+          total_outputTokens: (ragStats?.outputTokens || 0) + (fulfillmentStats?.outputTokens || 0),
+          total_tokens: (ragStats?.inputTokens || 0) + (ragStats?.outputTokens || 0) +
+                        (fulfillmentStats?.inputTokens || 0) + (fulfillmentStats?.outputTokens || 0),
+
+          // Total time (RAG + Fulfillment, includes plugin latency since plugins run during RAG)
+          total_time_sec: totalTime,
+
+          // Plugin latency total
+          total_plugin_latency_s: totalPluginLatencySec,
+
+          // Corrected RAG time (RAG time minus plugin latency, since plugins only run during RAG)
+          corrected_rag_time_s: ragTimeSec - totalPluginLatencySec,
         };
 
-        // Add plugin latencies as separate columns
+        // Add individual plugin latencies as separate columns
         if (pluginStats.length > 0) {
-          let totalPluginLatencyMs = 0;
           pluginStats.forEach((stat, idx) => {
             const latencySec = (stat.latencyMs || 0) / 1000;
             row[`plugin_${idx + 1}_id`] = stat.pluginId;
@@ -657,14 +746,7 @@ return new Promise((resolve) => {
             row[`plugin_${idx + 1}_success`] = stat.success;
             row[`plugin_${idx + 1}_stage`] = stat.stage;
             row[`plugin_${idx + 1}_executed_at`] = stat.executedAt;
-            totalPluginLatencyMs += stat.latencyMs || 0;
           });
-          const totalPluginLatencySec = totalPluginLatencyMs / 1000;
-          row['total_plugin_latency_s'] = totalPluginLatencySec;
-
-          // Calculate total time minus plugin latency
-          const totalTimeSec = m.totalTimeSec || 0;
-          row['total_time_minus_plugin_latency_s'] = totalTimeSec - totalPluginLatencySec;
         }
 
         return row;
