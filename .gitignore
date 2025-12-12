@@ -5,8 +5,13 @@
 # Output files
 result.csv
 system_metrics.csv
+*.json
 
 # Python cache
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Temporary qmassa files
+qmassa_monitor_*.json
+

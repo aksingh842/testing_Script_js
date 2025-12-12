@@ -787,7 +787,7 @@ async function runAllTests() {
 
   // Start system monitoring if MODEL_TYPE is "onprem"
   if (MODEL_TYPE.toLowerCase() === "onprem") {
-    console.log("\n📊 Starting System Resource Monitor...");
+    console.log("\n📊 Starting System Resource Monitor (CPU/Memory/GPU via qmassa)...");
     console.log(`   Target Process: ${MODEL_PROCESS_NAME}`);
     console.log(`   Metrics File: system_metrics.csv`);
 
