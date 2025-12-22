@@ -314,7 +314,7 @@ const TEST_CASES = [
       "Get the current CO2 concentration levels. Based on the data, generate a 'City Hazard Warning' infographic image.",
     plugins: [
       "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
-      "plugin-1756825179", // Image Generation (Reused from your list)
+      "plugin-1756825179", // Image Generation Tool
     ],
   },
   {
