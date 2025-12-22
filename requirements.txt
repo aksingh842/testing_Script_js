@@ -1,4 +1,11 @@
 # Python dependencies for monitor.py
 # Install with: pip install -r requirements.txt
 
+# Common
+python-dotenv>=1.0.0
+
+# Linux monitor (monitor_linux_backup.py) - uses qmassa + psutil
 psutil>=5.9.0
+
+# Windows monitor (monitor.py) - uses HWiNFO shared memory
+# No additional dependencies needed (uses built-in: mmap, ctypes, csv)

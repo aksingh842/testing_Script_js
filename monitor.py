@@ -1,315 +1,246 @@
 #!/usr/bin/env python3
 """
-Enhanced System Resource Monitor with qmassa GPU Support
-Monitors CPU, Memory, and GPU utilization using qmassa for comprehensive GPU stats.
+HWiNFO Shared Memory Monitor for Windows
+Reads hardware metrics from HWiNFO's shared memory interface and logs to CSV.
+
+Usage:
+    1. Start HWiNFO with Shared Memory Support enabled
+    2. Run: python -u monitor.py (in Admin PowerShell)
+
+Requirements:
+    - Windows OS
+    - HWiNFO64 with "Shared Memory Support" enabled in settings
+    - Administrator privileges (for shared memory access)
 """
 
-import psutil
+import mmap
+import ctypes
 import time
-import argparse
 import csv
-from datetime import datetime
+import datetime
 import os
-import subprocess
-import json
-import shutil
-import sys
-import tempfile
+from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
 
-def get_process_by_name(process_name):
-    """Finds a running process by its name or command line."""
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-        try:
-            if process_name.lower() in proc.info['name'].lower():
-                return proc
-            if proc.info['cmdline'] and any(process_name in s for s in proc.info['cmdline']):
-                return proc
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            pass
-    return None
+# =========================================================
+# HWiNFO Shared Memory Constants and Structs
+# =========================================================
+HWINFO_SENSORS_MAP_FILE_NAME = "Global\\HWiNFO_SENS_SM2"
+LOG_FILE = os.getenv("HWINFO_LOG_FILE", r"hwinfo_log.csv")
 
+# =========================================================
+# KEYWORD FILTER LIST
+# =========================================================
+# This list captures all key metrics relevant to model inference,
+# matching the fields found in your official HWiNFO log.
+TARGET_KEYWORDS = [
+    # --- GPU & Graphics ---
+    "GPU D3D",          # Covers D3D Usage, D3D Memory Dynamic
+    "GPU Video",        # Covers Video Decode 0, Video Processing usage
+    "GT Cores Power",   # iGPU specific power
+    "GPU Clock",        # Clock speed
+    "GPU Busy",         # Latency metric (from PresentMon)
+    "Framerate",        # FPS metrics (Presented/Displayed)
 
-def get_gpu_stats_qmassa(temp_file):
-    """
-    Capture a single snapshot of GPU stats using qmassa.
+    # --- CPU & System Power ---
+    "CPU Package Power",# Total chip power (CPU + iGPU + System Agent)
+    "Total CPU Usage",  # Global CPU load
+    "IA Cores Power",   # Power used by CPU cores only
 
-    Args:
-        temp_file: Path to temporary JSON file for qmassa output
+    # --- Thermals ---
+    "CPU GT Cores",     # iGPU Temperature (Graphics)
+    "CPU Package",      # Overall Package Temperature
+    "Drive Temperature",# SSD Temp
 
-    Returns:
-        dict with GPU metrics or None if capture failed
-    """
+    # --- Battery ---
+    "Charge Level",     # Battery %
+    "Remaining Capacity", # Wh remaining
+    "Battery Voltage",  # V
+
+    # --- NPU (If available) ---
+    "NPU"               # Will capture any NPU metrics if they appear
+]
+
+# =========================================================
+# HWiNFO Structures
+# =========================================================
+class HWiNFO_Header(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("Signature", ctypes.c_char * 4),
+        ("Version", ctypes.c_uint32),
+        ("Revision", ctypes.c_uint32),
+        ("PollTime", ctypes.c_int64),
+        ("OffsetOfSensorSection", ctypes.c_uint32),
+        ("SizeOfSensorElement", ctypes.c_uint32),
+        ("NumSensorElements", ctypes.c_uint32),
+        ("OffsetOfReadingSection", ctypes.c_uint32),
+        ("SizeOfReadingElement", ctypes.c_uint32),
+        ("NumReadingElements", ctypes.c_uint32)
+    ]
+
+class HWiNFO_Element_460(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("tReading", ctypes.c_uint32),
+        ("dwSensorIndex", ctypes.c_uint32),
+        ("dwReadingID", ctypes.c_uint32),
+        ("szLabelOrig", ctypes.c_char * 128),
+        ("szLabelUser", ctypes.c_char * 128),
+        ("szUnit", ctypes.c_char * 16),
+        ("Value", ctypes.c_double),
+        ("ValueMin", ctypes.c_double),
+        ("ValueMax", ctypes.c_double),
+        ("ValueAvg", ctypes.c_double),
+        ("Padding", ctypes.c_ubyte * (460 - 320))
+    ]
+
+class HWiNFO_Element_320(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("tReading", ctypes.c_uint32),
+        ("dwSensorIndex", ctypes.c_uint32),
+        ("dwReadingID", ctypes.c_uint32),
+        ("szLabelOrig", ctypes.c_char * 128),
+        ("szLabelUser", ctypes.c_char * 128),
+        ("szUnit", ctypes.c_char * 16),
+        ("Value", ctypes.c_double),
+        ("ValueMin", ctypes.c_double),
+        ("ValueMax", ctypes.c_double),
+        ("ValueAvg", ctypes.c_double)
+    ]
+
+class HWiNFO_Element_252(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("tReading", ctypes.c_uint32),
+        ("dwSensorIndex", ctypes.c_uint32),
+        ("dwReadingID", ctypes.c_uint32),
+        ("szLabelOrig", ctypes.c_char * 96),
+        ("szLabelUser", ctypes.c_char * 96),
+        ("szUnit", ctypes.c_char * 16),
+        ("Value", ctypes.c_double),
+        ("ValueMin", ctypes.c_double),
+        ("ValueMax", ctypes.c_double),
+        ("ValueAvg", ctypes.c_double)
+    ]
+
+# =========================================================
+# Functions
+# =========================================================
+
+def get_hwinfo_data():
+    """Reads shared memory and returns a dictionary of filtered metrics."""
+    metrics = {}
     try:
-        # Run qmassa for a single iteration and save to JSON
-        result = subprocess.run(
-            ["sudo", "-n", "qmassa", "-x", "-n", "1", "-t", temp_file],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
+        shm = mmap.mmap(-1, 500000, tagname=HWINFO_SENSORS_MAP_FILE_NAME, access=mmap.ACCESS_READ)
+        header = HWiNFO_Header.from_buffer_copy(shm.read(ctypes.sizeof(HWiNFO_Header)))
 
-        if result.returncode != 0:
+        if header.Signature != b'HWiS':
+             shm.close()
+             return None
+
+        # Select Structure based on size from header
+        element_size = header.SizeOfReadingElement
+        if element_size == 460: element_struct = HWiNFO_Element_460
+        elif element_size == 320: element_struct = HWiNFO_Element_320
+        elif element_size == 252: element_struct = HWiNFO_Element_252
+        else:
+            shm.close()
             return None
 
-        # Read and parse the JSON output
-        if not os.path.exists(temp_file):
-            return None
+        shm.seek(header.OffsetOfReadingSection)
 
-        with open(temp_file, 'r') as f:
-            data = json.load(f)
+        for _ in range(header.NumReadingElements):
+            block = shm.read(element_size)
+            element = element_struct.from_buffer_copy(block)
 
-        # Extract GPU stats from qmassa JSON
-        gpu_stats = {}
+            try:
+                label = element.szLabelUser.decode('latin-1').strip('\x00')
+                unit = element.szUnit.decode('latin-1').strip('\x00')
+            except:
+                continue
 
-        if 'iterations' in data and len(data['iterations']) > 0:
-            latest = data['iterations'][-1]
+            if element.tReading != 0 and label:
+                # Check if this sensor is in our target list
+                if any(k in label for k in TARGET_KEYWORDS):
+                    full_key = f"{label} [{unit}]" if unit else label
+                    metrics[full_key] = element.Value
 
-            # Get device stats (first GPU)
-            if 'devices' in latest and len(latest['devices']) > 0:
-                device = latest['devices'][0]
+        shm.close()
+        return metrics
 
-                # Memory usage
-                if 'memory' in device:
-                    mem = device['memory']
-                    if 'system' in mem:
-                        gpu_stats['gpu_system_mem_used_mb'] = mem['system'].get('used', 0) / (1024 * 1024)
-                        gpu_stats['gpu_system_mem_total_mb'] = mem['system'].get('total', 0) / (1024 * 1024)
-                    if 'device' in mem:
-                        gpu_stats['gpu_vram_used_mb'] = mem['device'].get('used', 0) / (1024 * 1024)
-                        gpu_stats['gpu_vram_total_mb'] = mem['device'].get('total', 0) / (1024 * 1024)
-
-                # Engine utilization (sum all engines)
-                if 'engines' in device:
-                    total_util = 0
-                    engine_count = 0
-                    for engine_name, engine_data in device['engines'].items():
-                        if isinstance(engine_data, dict) and 'busy' in engine_data:
-                            total_util += engine_data['busy']
-                            engine_count += 1
-                            # Also store individual engine stats
-                            clean_name = engine_name.replace('/', '_').lower()
-                            gpu_stats[f'gpu_engine_{clean_name}_percent'] = engine_data['busy']
-
-                    if engine_count > 0:
-                        gpu_stats['gpu_total_utilization_percent'] = total_util / engine_count
-                    else:
-                        gpu_stats['gpu_total_utilization_percent'] = 0.0
-
-                # Frequency
-                if 'frequencies' in device:
-                    freq = device['frequencies']
-                    if isinstance(freq, dict):
-                        gpu_stats['gpu_freq_actual_mhz'] = freq.get('actual', 0)
-                        gpu_stats['gpu_freq_requested_mhz'] = freq.get('requested', 0)
-                        gpu_stats['gpu_freq_max_mhz'] = freq.get('max', 0)
-
-                # Power
-                if 'power' in device:
-                    pwr = device['power']
-                    if isinstance(pwr, dict):
-                        gpu_stats['gpu_power_watts'] = pwr.get('gpu', 0)
-                        gpu_stats['gpu_package_power_watts'] = pwr.get('package', 0)
-
-                # Temperature
-                if 'temperature' in device:
-                    temps = device['temperature']
-                    if isinstance(temps, dict):
-                        for temp_name, temp_val in temps.items():
-                            clean_name = temp_name.replace('-', '_').lower()
-                            gpu_stats[f'gpu_temp_{clean_name}_c'] = temp_val
-
-        # Clean up temp file
-        try:
-            os.remove(temp_file)
-        except:
-            pass
-
-        return gpu_stats if gpu_stats else None
-
-    except (subprocess.TimeoutExpired, subprocess.SubprocessError, json.JSONDecodeError) as e:
+    except Exception:
         return None
 
-
-def monitor(target_identifier, output_file="system_metrics.csv", interval=0.5, use_qmassa=True):
-    """
-    Monitors CPU, RAM, and GPU utilization for a target process.
-
-    Args:
-        target_identifier: PID (int) or process name (str) to monitor
-        output_file: CSV file path for output metrics
-        interval: Sampling interval in seconds
-        use_qmassa: Whether to use qmassa for GPU monitoring
-    """
-    # --- Find Target Process (CPU/RAM) ---
-    try:
-        pid = int(target_identifier)
-        process = psutil.Process(pid)
-    except ValueError:
-        process = get_process_by_name(target_identifier)
-
-    if not process:
-        print(f"❌ Process '{target_identifier}' not found.", file=sys.stderr)
-        print("Available Python processes:", file=sys.stderr)
-        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-            try:
-                if 'python' in proc.info['name'].lower():
-                    cmdline = ' '.join(proc.info['cmdline'][:3]) if proc.info['cmdline'] else ''
-                    print(f"  PID {proc.info['pid']}: {proc.info['name']} {cmdline}", file=sys.stderr)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-        return 1
-
-    print(f"📊 Monitoring Process: {process.name()} (PID: {process.pid})")
-
-    # --- Check for GPU Monitor ---
-    has_gpu_monitor = False
-    gpu_temp_file = None
-
-    if use_qmassa:
-        qmassa_path = shutil.which("qmassa")
-        if qmassa_path:
-            print("✅ 'qmassa' found. Starting GPU monitoring with qmassa.")
-            # Create temp file for qmassa JSON output
-            gpu_temp_file = os.path.join(tempfile.gettempdir(), f"qmassa_monitor_{os.getpid()}.json")
-            has_gpu_monitor = True
-        else:
-            print("⚠️ 'qmassa' not found. Install with: cargo install --locked qmassa")
-            print("⚠️ Monitoring CPU/RAM only.")
-
-    # --- Setup CSV Logging ---
-    file_exists = os.path.isfile(output_file)
-
-    # Determine CSV headers
-    header = ["timestamp", "cpu_percent", "memory_mb"]
-
-    # We'll add GPU columns dynamically on first GPU stats capture
-    gpu_columns_added = False
-    all_gpu_keys = []
-
-    try:
-        with open(output_file, 'a', newline='') as f:
-            writer = csv.writer(f)
-
-            if not file_exists:
-                writer.writerow(header)
-
-            # Initialize CPU measurement (first call returns 0.0)
-            process.cpu_percent(interval=None)
-
-            print(f"📝 Logging to: {output_file}")
-            print("Press Ctrl+C to stop monitoring\n")
-
-            try:
-                while True:
-                    # 1. Get CPU and Memory usage from psutil
-                    try:
-                        cpu_util = process.cpu_percent(interval=None)
-                        mem_mb = process.memory_info().rss / (1024 * 1024)
-                    except psutil.NoSuchProcess:
-                        print("\n✅ Target process terminated.")
-                        break
-
-                    row_data = [datetime.now().isoformat(), cpu_util, round(mem_mb, 2)]
-
-                    # 2. Get GPU stats if qmassa is available
-                    if has_gpu_monitor and gpu_temp_file:
-                        gpu_stats = get_gpu_stats_qmassa(gpu_temp_file)
-
-                        if gpu_stats:
-                            # On first successful GPU capture, update CSV header
-                            if not gpu_columns_added:
-                                all_gpu_keys = sorted(gpu_stats.keys())
-                                header.extend(all_gpu_keys)
-
-                                # Rewrite header if file is new or recreate with new header
-                                if file_exists:
-                                    # File exists but we need to add GPU columns
-                                    # Just add them to current header for new rows
-                                    pass
-                                else:
-                                    # Rewrite header with GPU columns
-                                    f.seek(0)
-                                    writer.writerow(header)
-
-                                gpu_columns_added = True
-
-                            # Add GPU values in consistent order
-                            for key in all_gpu_keys:
-                                row_data.append(gpu_stats.get(key, 0.0))
-                        else:
-                            # No GPU stats, append zeros
-                            if gpu_columns_added:
-                                row_data.extend([0.0] * len(all_gpu_keys))
-
-                    # 3. Write data to CSV
-                    writer.writerow(row_data)
-                    f.flush()
-
-                    # Sleep to maintain the desired interval
-                    time.sleep(interval)
-
-            except KeyboardInterrupt:
-                print("\n✅ Monitoring stopped by user.")
-
-    except IOError as e:
-        print(f"❌ Error writing to {output_file}: {e}", file=sys.stderr)
-        return 1
-
-    finally:
-        # Clean up temp file
-        if gpu_temp_file and os.path.exists(gpu_temp_file):
-            try:
-                os.remove(gpu_temp_file)
-            except:
-                pass
-
-    return 0
-
+def safe_fmt(val):
+    """Safely formats a value to 1 decimal place if it's a number."""
+    if isinstance(val, (int, float)):
+        return f"{val:.1f}"
+    return str(val)
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Monitor CPU, RAM, and GPU (via qmassa) for a process.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Monitor by process name with qmassa
-  python3 monitor.py python --out model_metrics.csv
+    print(f"Monitoring started. Logging to {LOG_FILE}...")
+    print("Press Ctrl+C to stop.\n")
 
-  # Monitor by PID
-  python3 monitor.py 12345 --out metrics.csv
+    csv_headers = None
 
-  # Without GPU monitoring
-  python3 monitor.py python --no-gpu
-        """
-    )
-    parser.add_argument(
-        "target",
-        help="PID or unique name of the model process (e.g., 'python', 'uvicorn')"
-    )
-    parser.add_argument(
-        "--out",
-        default="system_metrics.csv",
-        help="Output CSV file name (default: system_metrics.csv)"
-    )
-    parser.add_argument(
-        "--interval",
-        type=float,
-        default=0.5,
-        help="Monitoring interval in seconds (default: 0.5)"
-    )
-    parser.add_argument(
-        "--no-gpu",
-        action="store_true",
-        help="Disable GPU monitoring (CPU/RAM only)"
-    )
+    try:
+        while True:
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+            data = get_hwinfo_data()
 
-    args = parser.parse_args()
+            if data:
+                row_data = {"Time": timestamp}
+                row_data.update(data)
 
-    use_qmassa = not args.no_gpu
-    exit_code = monitor(args.target, output_file=args.out, interval=args.interval, use_qmassa=use_qmassa)
-    sys.exit(exit_code)
+                # Setup CSV header if first run
+                if csv_headers is None:
+                    csv_headers = list(row_data.keys())
+                    with open(LOG_FILE, 'w', newline='') as f:
+                        writer = csv.DictWriter(f, fieldnames=csv_headers)
+                        writer.writeheader()
 
+                # Append data to CSV
+                with open(LOG_FILE, 'a', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=csv_headers)
+                    # Use dictionary matching to safely write row
+                    clean_row = {k: row_data.get(k, '') for k in csv_headers}
+                    writer.writerow(clean_row)
+
+                # --- Safe Console Summary ---
+                # We prioritize specific sensors for the live view
+                gpu_mem = data.get('GPU D3D Memory Dynamic [MB]', 'N/A')
+
+                # Fallback logic for GPU Power: try GT Cores -> CPU GT Cores
+                gpu_pwr = data.get('GT Cores Power [W]',
+                          data.get('CPU GT Cores Power [W]', 'N/A'))
+
+                # Fallback logic for Total Power: try CPU Package Power
+                pkg_pwr = data.get('CPU Package Power [W]', 'N/A')
+
+                gpu_clk = data.get('GPU Clock [MHz]', 'N/A')
+                gpu_load = data.get('GPU D3D Usage [%]', 'N/A')
+                bat_pct = data.get('Charge Level [%]', 'N/A')
+
+                print(f"[{timestamp}] Logged {len(data)} metrics.")
+                print(f"   GPU Memory: {safe_fmt(gpu_mem)} MB")
+                print(f"   GPU Usage:  {safe_fmt(gpu_load)} %")
+                print(f"   GPU Power:  {safe_fmt(gpu_pwr)} W  (Total Pkg: {safe_fmt(pkg_pwr)} W)")
+                print(f"   GPU Clock:  {safe_fmt(gpu_clk)} MHz")
+                print(f"   Battery:    {safe_fmt(bat_pct)} %")
+                print("-" * 50)
+                # ----------------------------
+
+            else:
+                print("Error reading HWiNFO. Is it running?")
+
+            time.sleep(5)
+
+    except KeyboardInterrupt:
+        print(f"\nStopped. Data saved to {LOG_FILE}")
 
 if __name__ == "__main__":
     main()

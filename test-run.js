@@ -20,6 +20,9 @@ let COMPANY_ID = process.env.COMPANY_ID || "";
 const MODEL_TYPE = process.env.MODEL_TYPE || "api"; // "onprem" or "api"
 const MODEL_PROCESS_NAME = process.env.MODEL_PROCESS_NAME || "python";
 
+// Platform detection for monitor script
+const IS_WINDOWS = process.platform === "win32";
+
 // ------------------------
 // TEST CASES
 // ------------------------
@@ -787,18 +790,31 @@ async function runAllTests() {
 
   // Start system monitoring if MODEL_TYPE is "onprem"
   if (MODEL_TYPE.toLowerCase() === "onprem") {
-    console.log("\n📊 Starting System Resource Monitor (CPU/Memory/GPU via qmassa)...");
-    console.log(`   Target Process: ${MODEL_PROCESS_NAME}`);
-    console.log(`   Metrics File: system_metrics.csv`);
+    if (IS_WINDOWS) {
+      // Windows: Use HWiNFO shared memory monitor (no args needed, reads from .env)
+      console.log("\n📊 Starting System Resource Monitor (HWiNFO Shared Memory)...");
+      console.log(`   Metrics File: ${process.env.HWINFO_LOG_FILE || 'hwinfo_log.csv'}`);
+      console.log(`   ⚠️  Ensure HWiNFO is running with Shared Memory Support enabled`);
 
-    monitorProcess = spawn("python3", [
-      "monitor.py",
-      MODEL_PROCESS_NAME,
-      "--out",
-      "system_metrics.csv",
-      "--interval",
-      "0.5"
-    ]);
+      monitorProcess = spawn("python", ["-u", "monitor.py"], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: true
+      });
+    } else {
+      // Linux: Use qmassa-based monitor with process targeting
+      console.log("\n📊 Starting System Resource Monitor (CPU/Memory/GPU via qmassa)...");
+      console.log(`   Target Process: ${MODEL_PROCESS_NAME}`);
+      console.log(`   Metrics File: system_metrics.csv`);
+
+      monitorProcess = spawn("python3", [
+        "monitor_linux_backup.py",
+        MODEL_PROCESS_NAME,
+        "--out",
+        "system_metrics.csv",
+        "--interval",
+        "0.5"
+      ]);
+    }
 
     monitorProcess.stdout.on('data', (data) => {
       console.log(`[Monitor]: ${data.toString().trim()}`);
