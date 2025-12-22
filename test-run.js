@@ -479,7 +479,7 @@ async function sendStream(sessionId, payload, retry = 0) {
       url: API_URL,
       data: payload,
       responseType: "stream",
-      timeout: 60000,
+      timeout: 300000, // 5 minutes - streaming can take longer
       headers: {
         Authorization: `Bearer ${ACCESS_TOKEN}`,
         "Content-Type": "application/json",
