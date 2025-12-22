@@ -450,6 +450,30 @@ async function sendStream(sessionId, payload, retry = 0) {
   }
 }
 
+// ---------------- ERROR PATTERNS TO DETECT ----------------
+const ERROR_PATTERNS = [
+  { pattern: /rag[_\s-]?error/i, name: "RAG Error" },
+  { pattern: /fulfillment[_\s-]?error/i, name: "Fulfillment Error" },
+  { pattern: /internal[_\s-]?server[_\s-]?error/i, name: "Internal Server Error" },
+  { pattern: /"error"\s*:\s*true/i, name: "Error Flag Detected" },
+  { pattern: /"errorCode"\s*:/i, name: "Error Code Detected" },
+  { pattern: /failed to execute/i, name: "Execution Failure" },
+  { pattern: /plugin[_\s-]?execution[_\s-]?failed/i, name: "Plugin Execution Failed" },
+];
+
+// Function to detect errors in response
+function detectResponseErrors(response, answer) {
+  const errors = [];
+
+  for (const { pattern, name } of ERROR_PATTERNS) {
+    if (pattern.test(response) || pattern.test(answer)) {
+      errors.push(name);
+    }
+  }
+
+  return errors;
+}
+
 // ---------------- PROCESS TEST CASE ----------------
 async function runTestCase(test, index) {
   console.log(`\n=================================`);
@@ -458,8 +482,8 @@ async function runTestCase(test, index) {
 
   const sessionId = await createSession();
   if (!sessionId) {
-    console.error("❌ Could not create session. Skipping test.");
-    return;
+    console.error("❌ Could not create session. Stopping test suite.");
+    return { success: false, error: "Session creation failed", fatal: true };
   }
 
   const payload = {
@@ -475,7 +499,6 @@ async function runTestCase(test, index) {
 
   let fullResponse = "";
   let finalAnswer = "";
-  let metrics = null;
   let allMetrics = [];
 
   let response;
@@ -484,6 +507,7 @@ async function runTestCase(test, index) {
     response = await sendStream(sessionId, payload);
   } catch (err) {
     console.error("❌ Request failed:", err.message);
+    let errorDetails = err.message;
 
     // Try to read the error response body if it exists
     if (err.response?.data) {
@@ -503,8 +527,10 @@ async function runTestCase(test, index) {
               try {
                 const parsed = JSON.parse(errorBody);
                 console.error("🔍 Parsed error:", JSON.stringify(parsed, null, 2));
+                errorDetails = parsed.message || parsed.error || errorBody;
               } catch (e) {
                 // Not JSON, already printed raw
+                errorDetails = errorBody;
               }
               resolve();
             });
@@ -512,6 +538,7 @@ async function runTestCase(test, index) {
         } else {
           // Already parsed
           console.error("📄 Error response:", JSON.stringify(err.response.data, null, 2));
+          errorDetails = err.response.data.message || err.response.data.error || JSON.stringify(err.response.data);
         }
       } catch (readErr) {
         console.error("⚠️ Could not read error body:", readErr.message);
@@ -522,7 +549,7 @@ async function runTestCase(test, index) {
       console.error("📊 Status code:", err.response.status);
     }
 
-    return;
+    return { success: false, error: `Request failed: ${errorDetails}`, fatal: true };
   }
 
 return new Promise((resolve) => {
@@ -535,7 +562,7 @@ return new Promise((resolve) => {
     streamTimeout = setTimeout(() => {
       console.log("\n⏰ Stream timeout - forcing completion");
       response.data.destroy();
-      resolve();
+      resolve({ success: false, error: "Stream timeout after 5 minutes", fatal: true });
     }, 300000); // 5 minutes
   };
   
@@ -609,7 +636,7 @@ return new Promise((resolve) => {
   response.data.on("error", (err) => {
     clearTimeout(streamTimeout);
     console.error("\n❌ Stream error:", err.message);
-    resolve();
+    resolve({ success: false, error: `Stream error: ${err.message}`, fatal: true });
   });
 
   response.data.on("end", async () => {
@@ -639,6 +666,37 @@ return new Promise((resolve) => {
           }
         }
       }
+    }
+
+    // ========== ERROR DETECTION SECTION ==========
+
+    // Check for blank/empty response
+    if (!finalAnswer || finalAnswer.trim().length === 0) {
+      console.error("\n❌ FAILURE: Response is blank or empty");
+      console.error("📄 Full response data:", fullResponse.substring(0, 500) + "...");
+      resolve({
+        success: false,
+        error: "Response is blank or empty",
+        fatal: true,
+        sessionId
+      });
+      return;
+    }
+
+    // Check for errors in the response content
+    const detectedErrors = detectResponseErrors(fullResponse, finalAnswer);
+    if (detectedErrors.length > 0) {
+      console.error("\n❌ FAILURE: Errors detected in response");
+      console.error("🔍 Detected errors:", detectedErrors.join(", "));
+      console.error("📄 Response excerpt:", finalAnswer.substring(0, 300) + "...");
+      resolve({
+        success: false,
+        error: `Response contains errors: ${detectedErrors.join(", ")}`,
+        fatal: true,
+        sessionId,
+        detectedErrors
+      });
+      return;
     }
 
     console.log(`\n\n✅ Completed: ${test.name}`);
@@ -773,7 +831,7 @@ return new Promise((resolve) => {
       console.log("ℹ️ No metrics found for:", test.name);
     }
 
-    resolve();
+    resolve({ success: true, sessionId, answerLength: finalAnswer.length });
   });
 });
   
@@ -795,6 +853,7 @@ async function runAllTests() {
       console.log("\n📊 Starting System Resource Monitor (HWiNFO Shared Memory)...");
       console.log(`   Metrics File: ${process.env.HWINFO_LOG_FILE || 'hwinfo_log.csv'}`);
       console.log(`   ⚠️  Ensure HWiNFO is running with Shared Memory Support enabled`);
+      console.log(`   ⚠️  Run this script as Administrator for shared memory access`);
 
       monitorProcess = spawn("python", ["-u", "monitor.py"], {
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -835,11 +894,38 @@ async function runAllTests() {
     console.log(`\n⏭️  Skipping system monitoring (MODEL_TYPE=${MODEL_TYPE})`);
   }
 
+  let testsFailed = 0;
+  let testsPassed = 0;
+  let fatalError = null;
+
   try {
     for (let i = 0; i < TEST_CASES.length; i++) {
-      await runTestCase(TEST_CASES[i], i);
+      const result = await runTestCase(TEST_CASES[i], i);
 
-      if (i < TEST_CASES.length - 1) {
+      // Check result for failures
+      if (result && !result.success) {
+        testsFailed++;
+        console.error(`\n${"=".repeat(50)}`);
+        console.error(`❌ TEST FAILED: ${TEST_CASES[i].name}`);
+        console.error(`   Error: ${result.error}`);
+        console.error(`${"=".repeat(50)}`);
+
+        // Stop on fatal errors
+        if (result.fatal) {
+          fatalError = result.error;
+          console.error(`\n🛑 FATAL ERROR - Stopping test suite`);
+          console.error(`   Reason: ${result.error}`);
+          break;
+        }
+      } else if (result && result.success) {
+        testsPassed++;
+      } else {
+        // No result returned (shouldn't happen now, but handle gracefully)
+        testsFailed++;
+        console.error(`\n❌ TEST FAILED: ${TEST_CASES[i].name} (no result returned)`);
+      }
+
+      if (i < TEST_CASES.length - 1 && !fatalError) {
         console.log("\n⏳ Waiting 2 sec...");
         await new Promise((r) => setTimeout(r, 2000));
       }
@@ -869,7 +955,26 @@ async function runAllTests() {
     }
   }
 
-  console.log("\n🎉 ALL TESTS COMPLETED\n");
+  // Print summary
+  console.log("\n" + "=".repeat(50));
+  console.log("📊 TEST SUITE SUMMARY");
+  console.log("=".repeat(50));
+  console.log(`   Total Tests: ${TEST_CASES.length}`);
+  console.log(`   ✅ Passed: ${testsPassed}`);
+  console.log(`   ❌ Failed: ${testsFailed}`);
+  console.log(`   ⏭️  Skipped: ${TEST_CASES.length - testsPassed - testsFailed}`);
+  console.log("=".repeat(50));
+
+  if (fatalError) {
+    console.error(`\n❌ TEST SUITE FAILED`);
+    console.error(`   Fatal Error: ${fatalError}`);
+    process.exit(1);
+  } else if (testsFailed > 0) {
+    console.error(`\n❌ TEST SUITE COMPLETED WITH FAILURES`);
+    process.exit(1);
+  } else {
+    console.log("\n🎉 ALL TESTS PASSED\n");
+  }
 }
 
 module.exports = { runAllTests };
