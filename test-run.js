@@ -281,6 +281,15 @@ const TEST_CASES = [
   //     "plugin-1739264368", // PDF
   //   ],
   // },
+  {
+    name: "Tesla Price Update + Email",
+    query:
+      "Fetch the latest Tesla (TSLA) US stock price and send an email with the details to akhilesh21221@gmail.com.",
+    plugins: [
+      "plugin-1716434059", // US Stock Analysis
+      "plugin-1722285968", // Email Agent
+    ],
+  },
 
   //IOT TEST CASES
   {
