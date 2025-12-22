@@ -19,10 +19,16 @@ import time
 import csv
 import datetime
 import os
+import argparse
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+# Parse command line arguments
+parser = argparse.ArgumentParser(description='HWiNFO Shared Memory Monitor')
+parser.add_argument('--run-id', type=str, default=None, help='Unique run ID to include in CSV')
+args = parser.parse_args()
 
 # =========================================================
 # HWiNFO Shared Memory Constants and Structs
@@ -182,7 +188,10 @@ def safe_fmt(val):
     return str(val)
 
 def main():
+    run_id = args.run_id
     print(f"Monitoring started. Logging to {LOG_FILE}...")
+    if run_id:
+        print(f"Run ID: {run_id}")
     print("Press Ctrl+C to stop.\n")
 
     csv_headers = None
@@ -193,7 +202,7 @@ def main():
             data = get_hwinfo_data()
 
             if data:
-                row_data = {"Time": timestamp}
+                row_data = {"Run_ID": run_id or "N/A", "Time": timestamp}
                 row_data.update(data)
 
                 # Setup CSV header if first run
