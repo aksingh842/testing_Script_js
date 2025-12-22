@@ -12,6 +12,9 @@ const REFRESH_URL = "https://gateway-dev.on-demand.io/v1/auth/user/refresh_token
 const SESSION_CREATE_URL = "https://gateway-dev.on-demand.io/chat/v1/client/sessions";
 const WEBHOOK_URL = process.env.WEBHOOK_URL || "";
 
+// Generate unique run ID (timestamp + random suffix)
+const RUN_ID = `run_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
 let ACCESS_TOKEN = process.env.ACCESS_TOKEN || "";
 let REFRESH_TOKEN = process.env.REFRESH_TOKEN || "";
 let COMPANY_ID = process.env.COMPANY_ID || "";
@@ -278,6 +281,51 @@ const TEST_CASES = [
   //     "plugin-1739264368", // PDF
   //   ],
   // },
+
+  //IOT TEST CASES
+  {
+    name: "City Environmental Health Check (Easy)",
+    query:
+      "Get the city's current temperature, humidity, and CO2 concentration to assess the air quality index.",
+    plugins: [
+      "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
+    ],
+  },
+  {
+    name: "Night Mode Activation (Easy)",
+    query:
+      "Turn on all street lights and ensure the railway barriers are active for night safety.",
+    plugins: [
+      "plugin-1765540909", // Smart City Infrastructure Tool
+    ],
+  },
+  {
+    name: "Smart Grid & Resource Report (Medium)",
+    query:
+      "Get a summary of all sensor data including resource usage, and check the current status of the wind turbines.",
+    plugins: [
+      "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
+      "plugin-1765540909", // Smart City Infrastructure Tool
+    ],
+  },
+  {
+    name: "Emergency Hazard Viz (Medium)",
+    query:
+      "Get the current CO2 concentration levels. Based on the data, generate a 'City Hazard Warning' infographic image.",
+    plugins: [
+      "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
+      "plugin-1756825179", // Image Generation (Reused from your list)
+    ],
+  },
+  {
+    name: "Eco-Infrastructure Status (Medium)",
+    query:
+      "Turn on the wind turbines to maximize energy capture, then fetch the city's humidity and temperature to log operating conditions.",
+    plugins: [
+      "plugin-1765540909", // Smart City Infrastructure Tool
+      "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
+    ],
+  },
 ];
 
 // ---------------- TOKEN REFRESH ----------------
@@ -729,6 +777,7 @@ return new Promise((resolve) => {
     if (WEBHOOK_URL) {
       try {
         await axios.post(WEBHOOK_URL, {
+          runId: RUN_ID,
           testName: test.name,
           sessionId,
           response: fullResponse,
@@ -775,6 +824,7 @@ return new Promise((resolve) => {
         const totalTime = ragTimeSec + fulfillmentTimeSec;
 
         const row = {
+          runId: RUN_ID,
           testName: test.name,
           timestamp: new Date().toISOString(),
           sessionId,
@@ -854,6 +904,7 @@ return new Promise((resolve) => {
 // ---------------- TEST SUITE ----------------
 async function runAllTests() {
   console.log("\n🎯 Starting Test Suite");
+  console.log(`🆔 Run ID: ${RUN_ID}`);
   console.log(`Company: ${COMPANY_ID}`);
   console.log(`Model Type: ${MODEL_TYPE}`);
   console.log(`Total Tests: ${TEST_CASES.length}`);
@@ -863,13 +914,13 @@ async function runAllTests() {
   // Start system monitoring if MODEL_TYPE is "onprem"
   if (MODEL_TYPE.toLowerCase() === "onprem") {
     if (IS_WINDOWS) {
-      // Windows: Use HWiNFO shared memory monitor (no args needed, reads from .env)
+      // Windows: Use HWiNFO shared memory monitor
       console.log("\n📊 Starting System Resource Monitor (HWiNFO Shared Memory)...");
       console.log(`   Metrics File: ${process.env.HWINFO_LOG_FILE || 'hwinfo_log.csv'}`);
+      console.log(`   Run ID: ${RUN_ID}`);
       console.log(`   ⚠️  Ensure HWiNFO is running with Shared Memory Support enabled`);
-      console.log(`   ⚠️  Run this script as Administrator for shared memory access`);
 
-      monitorProcess = spawn("python", ["-u", "monitor.py"], {
+      monitorProcess = spawn("python", ["-u", "monitor.py", "--run-id", RUN_ID], {
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: true
       });
@@ -877,6 +928,7 @@ async function runAllTests() {
       // Linux: Use qmassa-based monitor with process targeting
       console.log("\n📊 Starting System Resource Monitor (CPU/Memory/GPU via qmassa)...");
       console.log(`   Target Process: ${MODEL_PROCESS_NAME}`);
+      console.log(`   Run ID: ${RUN_ID}`);
       console.log(`   Metrics File: system_metrics.csv`);
 
       monitorProcess = spawn("python3", [
@@ -885,7 +937,9 @@ async function runAllTests() {
         "--out",
         "system_metrics.csv",
         "--interval",
-        "0.5"
+        "0.5",
+        "--run-id",
+        RUN_ID
       ]);
     }
 
@@ -980,6 +1034,7 @@ async function runAllTests() {
   console.log("\n" + "=".repeat(50));
   console.log("📊 TEST SUITE SUMMARY");
   console.log("=".repeat(50));
+  console.log(`   🆔 Run ID: ${RUN_ID}`);
   console.log(`   Total Tests: ${TEST_CASES.length}`);
   console.log(`   ✅ Passed: ${testsPassed}`);
   console.log(`   ❌ Failed: ${testsFailed}`);
