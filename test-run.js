@@ -726,20 +726,34 @@ return new Promise((resolve) => {
     }
 
     // webhook
-    try {
-      await axios.post(WEBHOOK_URL, {
-        testName: test.name,
-        sessionId,
-        response: fullResponse,
-        answer: finalAnswer,
-        metrics: allMetrics,
-        pluginStats: pluginStats,
-        ragStats: ragStats,
-        fulfillmentStats: fulfillmentStats
-      });
-      console.log("📤 Webhook sent");
-    } catch (err) {
-      console.error("⚠️ Webhook error:", err.message);
+    if (WEBHOOK_URL) {
+      try {
+        await axios.post(WEBHOOK_URL, {
+          testName: test.name,
+          sessionId,
+          response: fullResponse,
+          answer: finalAnswer,
+          metrics: allMetrics,
+          pluginStats: pluginStats,
+          ragStats: ragStats,
+          fulfillmentStats: fulfillmentStats
+        });
+        console.log("📤 Webhook sent");
+      } catch (err) {
+        console.error("❌ Webhook failed:", err.message);
+        if (err.response?.status) {
+          console.error("   Status code:", err.response.status);
+        }
+        resolve({
+          success: false,
+          error: `Webhook failed: ${err.message}`,
+          fatal: true,
+          sessionId
+        });
+        return;
+      }
+    } else {
+      console.log("ℹ️ Webhook skipped (WEBHOOK_URL not configured)");
     }
 
     // Save metrics to CSV
@@ -933,6 +947,13 @@ async function runAllTests() {
   } finally {
     // Stop monitoring if it was started
     if (monitorProcess) {
+      // Wait 10 seconds after test completion to capture final metrics
+      // Skip only if there was a fatal error that stopped tests early
+      if (!fatalError) {
+        console.log("\n⏳ Waiting 10 seconds for final hardware metrics...");
+        await new Promise((r) => setTimeout(r, 10000));
+      }
+
       console.log("\n🛑 Stopping System Resource Monitor...");
       monitorProcess.kill("SIGINT");
 
