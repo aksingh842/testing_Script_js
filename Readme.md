@@ -1,30 +1,38 @@
 # AI Model Load Testing Suite with GPU Monitoring
 
-Production-ready load testing for AI models with comprehensive system resource monitoring. Tracks API performance, token usage (RAG + fulfillment), plugin latencies, and real-time CPU/memory/GPU metrics using qmassa.
+Production-ready load testing for AI models with comprehensive system resource monitoring. Tracks API performance, token usage (RAG + fulfillment), plugin latencies, and real-time CPU/memory/GPU metrics.
 
 ## Features
 
 - 🚀 **Stream-based API testing** - Real-time response capture with automatic token refresh
 - 📊 **Detailed Token Tracking** - Separate RAG and fulfillment token metrics via API
 - ⚡ **Plugin Latency Analysis** - Individual plugin execution timing
-- 🖥️ **System Monitoring** - CPU, memory, and comprehensive GPU stats (qmassa)
-- 📈 **High-Resolution Metrics** - 0.5s sampling intervals for granular performance data
+- 🖥️ **System Monitoring** - CPU, memory, and comprehensive GPU stats
+- 📈 **High-Resolution Metrics** - 5s sampling intervals for granular performance data
 - 📤 **Webhook Integration** - Automated results delivery
 - 📁 **CSV Export** - Easy analysis with Excel/Pandas/R
-- 🎯 **Intel GPU Support** - Optimized for Panther Lake, Arc, Core (xe/i915 drivers), also supports AMD
+- 🎯 **Cross-Platform** - Windows (HWiNFO) and Linux (qmassa) support
 
 ## Requirements
 
 ### System Requirements
+
+**Windows:**
+- **OS**: Windows 10/11
+- **GPU Monitoring**: HWiNFO64 (free version works)
+- **Privileges**: Administrator (for shared memory access)
+
+**Linux:**
 - **OS**: Bare metal Linux (Ubuntu 22.04+, Fedora, Arch, etc.)
 - **Kernel**: 6.8+ recommended for full GPU stats
 - **GPU**: Intel (xe/i915 driver) or AMD (amdgpu driver)
-- **Not compatible**: WSL2, Windows, macOS, VMs without GPU passthrough
+- **Not compatible**: WSL2, macOS, VMs without GPU passthrough
 
 ### Software Requirements
 - **Node.js**: 16+
 - **Python**: 3.8+
-- **Rust**: Latest stable (for qmassa)
+- **Rust**: Latest stable (for qmassa - Linux only)
+- **HWiNFO64**: Latest version (Windows only)
 
 ## Installation
 
@@ -49,7 +57,58 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. Install qmassa (GPU Monitoring)
+### 4. Install GPU Monitoring
+
+Choose the appropriate method based on your operating system:
+
+---
+
+## Windows: HWiNFO Setup
+
+### Step 4.1: Download and Install HWiNFO
+
+1. Download HWiNFO64 from: https://www.hwinfo.com/download/
+2. Install or run the portable version
+3. Choose **"Sensors-only"** mode when prompted (this is important!)
+
+### Step 4.2: Enable Shared Memory Support
+
+1. Open **HWiNFO64**
+2. When prompted, select **"Sensors-only"** mode
+3. Click the **Settings** button (gear icon) in the sensors window
+4. Go to the **"General / User Interface"** tab
+5. Check the box **"Shared Memory Support"**
+6. Click **OK**
+
+> **Note:** In the free version, Shared Memory Support will disable itself after 12 hours. You'll need to re-enable it manually or restart HWiNFO when that happens.
+
+### Step 4.3: Verify Sensors Window is Open
+
+- The **Sensors window must be open** for data to be available
+- You should see real-time hardware metrics (CPU temp, GPU usage, etc.)
+- Keep this window open while running tests
+
+### Step 4.4: Configure Environment for Windows
+
+Add to your `.env` file:
+```env
+MODEL_TYPE=onprem
+HWINFO_LOG_FILE=c:\Users\YourName\Downloads\ondemand\hwinfo_log.csv
+```
+
+### Step 4.5: Run as Administrator
+
+**Important:** You must run from an Administrator PowerShell:
+
+```powershell
+# Right-click PowerShell → "Run as administrator"
+cd c:\Users\YourName\Downloads\ondemand
+node index.js
+```
+
+---
+
+## Linux: qmassa Setup
 
 **Step 4.1: Install Rust**
 ```bash
@@ -303,7 +362,30 @@ print(results[['testName', 'rag_cost', 'fulfillment_cost', 'total_cost']])
 
 ## Troubleshooting
 
-### qmassa Issues
+### HWiNFO Issues (Windows)
+
+**"Error reading HWiNFO. Is it running?"**
+- Ensure HWiNFO64 is running in **Sensors-only** mode
+- Check that **Shared Memory Support** is enabled in Settings
+- The Sensors window must be **open** (not minimized to tray only)
+
+**"Access denied" or no data captured**
+- Run PowerShell as **Administrator** (right-click → Run as administrator)
+- HWiNFO shared memory requires elevated privileges
+
+**Shared Memory Support keeps disabling**
+- This is normal in the free version (12-hour limit)
+- Re-enable it in Settings → General / User Interface → Shared Memory Support
+- Or restart HWiNFO to reset the timer
+
+**Missing metrics in CSV**
+- Check `TARGET_KEYWORDS` in `monitor.py` matches your sensor names
+- Open HWiNFO sensors window to see available sensor names
+- Add missing keywords to the filter list
+
+---
+
+### qmassa Issues (Linux)
 
 **"No DRM devices found"**
 - Running on WSL2/VM: qmassa requires bare metal Linux
@@ -340,31 +422,34 @@ print(results[['testName', 'rag_cost', 'fulfillment_cost', 'total_cost']])
 
 ## Platform Support
 
-| Platform | Support | Notes |
-|----------|---------|-------|
-| Ubuntu 22.04+ | ✅ Full | Recommended |
-| Fedora 38+ | ✅ Full | Fully tested |
-| Arch Linux | ✅ Full | Latest kernel recommended |
-| **Intel Panther Lake** | ✅ Full | xe driver, all features |
-| **Intel Arc** | ✅ Full | xe driver, all features |
-| **Intel 11th Gen+** | ✅ Full | i915 driver |
-| **AMD GPUs** | ✅ Full | amdgpu driver |
-| WSL2 | ⚠️ Partial | No GPU monitoring, CPU/mem only |
-| macOS | ❌ No | qmassa not supported |
-| Windows | ❌ No | Use WSL2 for development |
+| Platform | Support | Monitor | Notes |
+|----------|---------|---------|-------|
+| **Windows 10/11** | ✅ Full | HWiNFO | Run as Administrator |
+| Ubuntu 22.04+ | ✅ Full | qmassa | Recommended for Linux |
+| Fedora 38+ | ✅ Full | qmassa | Fully tested |
+| Arch Linux | ✅ Full | qmassa | Latest kernel recommended |
+| **Intel Panther Lake** | ✅ Full | Both | xe driver (Linux), HWiNFO (Windows) |
+| **Intel Arc** | ✅ Full | Both | xe driver (Linux), HWiNFO (Windows) |
+| **Intel 11th Gen+** | ✅ Full | Both | i915 driver (Linux), HWiNFO (Windows) |
+| **AMD GPUs** | ✅ Full | Both | amdgpu driver (Linux), HWiNFO (Windows) |
+| **NVIDIA GPUs** | ✅ Full | HWiNFO | Windows only via HWiNFO |
+| WSL2 | ⚠️ Partial | None | No GPU monitoring, API mode only |
+| macOS | ❌ No | None | Not supported |
 
 ## Project Structure
 ```
 testing_Script_js/
 ├── index.js                    # Express server
 ├── test-run.js                 # Test suite with RAG/fulfillment tracking
-├── monitor.py                  # System monitor (psutil + qmassa)
-├── requirements.txt            # Python deps (psutil)
+├── monitor.py                  # Windows monitor (HWiNFO shared memory)
+├── monitor_linux_backup.py     # Linux monitor (psutil + qmassa)
+├── requirements.txt            # Python deps (psutil, python-dotenv)
 ├── package.json                # Node.js deps
 ├── .env                        # Configuration (create from .env.example)
 ├── .env.example                # Configuration template
 ├── result.csv                  # Test results (output)
-├── system_metrics.csv          # System metrics (output)
+├── system_metrics.csv          # Linux system metrics (output)
+├── hwinfo_log.csv              # Windows HWiNFO metrics (output)
 └── Readme.md                   # This file
 ```
 
@@ -387,17 +472,24 @@ Execute full test suite
 
 ## Development vs Production
 
-**Development (WSL2):**
+**Development (WSL2/No GPU monitoring):**
 ```env
 MODEL_TYPE=api  # Skip monitoring
 ```
 
-**Production (Bare Metal Linux):**
+**Production (Windows with HWiNFO):**
 ```env
-MODEL_TYPE=onprem  # Full monitoring
+MODEL_TYPE=onprem
+HWINFO_LOG_FILE=c:\path\to\hwinfo_log.csv
 ```
+Run PowerShell as Administrator with HWiNFO sensors open.
 
-Deploy code to production machine and run qmassa installation there.
+**Production (Bare Metal Linux with qmassa):**
+```env
+MODEL_TYPE=onprem
+MODEL_PROCESS_NAME=python
+```
+Ensure qmassa is installed and configured.
 
 ## Contributing
 1. Fork the repository
