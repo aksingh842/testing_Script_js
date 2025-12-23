@@ -38,9 +38,15 @@ def get_gpu_stats_qmassa(temp_file):
         tuple: (dict with GPU metrics, error_message or None)
     """
     try:
+        # Build command - use sudo only if not already root
+        if os.geteuid() == 0:
+            cmd = ["qmassa", "-x", "-n", "1", "-t", temp_file]
+        else:
+            cmd = ["sudo", "-n", "qmassa", "-x", "-n", "1", "-t", temp_file]
+
         # Run qmassa for a single iteration and save to JSON
         result = subprocess.run(
-            ["sudo", "-n", "qmassa", "-x", "-n", "1", "-t", temp_file],
+            cmd,
             capture_output=True,
             text=True,
             timeout=10
@@ -54,90 +60,120 @@ def get_gpu_stats_qmassa(temp_file):
         if not os.path.exists(temp_file):
             return None, "qmassa did not create output file"
 
+        # qmassa outputs NDJSON (one JSON object per line)
+        # Line 1: version string, Line 2: config, Line 3: actual data with devs_state
         with open(temp_file, 'r') as f:
-            data = json.load(f)
+            lines = f.readlines()
+
+        data = None
+        for line in reversed(lines):
+            line = line.strip()
+            if line and line.startswith('{'):
+                try:
+                    parsed = json.loads(line)
+                    # Look for the line with devs_state (actual GPU data)
+                    if 'devs_state' in parsed:
+                        data = parsed
+                        break
+                except json.JSONDecodeError:
+                    continue
+
+        if not data:
+            return None, "No valid GPU data in qmassa output"
 
         # Extract GPU stats from qmassa JSON
         gpu_stats = {}
 
-        if 'iterations' in data and len(data['iterations']) > 0:
-            latest = data['iterations'][-1]
+        # Get device stats from devs_state array
+        devs_state = data.get('devs_state', [])
+        if not devs_state or len(devs_state) == 0:
+            return None, "No devices in qmassa output"
 
-            # Get device stats (first GPU)
-            if 'devices' in latest and len(latest['devices']) > 0:
-                device = latest['devices'][0]
+        device = devs_state[0]
 
-                # Device info
-                if 'driver' in device:
-                    gpu_stats['gpu_driver'] = device['driver']
-                if 'type' in device:
-                    gpu_stats['gpu_type'] = device['type']
+        # Device info
+        if 'drv_name' in device:
+            gpu_stats['gpu_driver'] = device['drv_name']
+        if 'dev_type' in device:
+            gpu_stats['gpu_type'] = device['dev_type']
+        if 'vdr_dev' in device:
+            gpu_stats['gpu_name'] = device['vdr_dev']
 
-                # Memory usage (values in bytes from qmassa, convert to MB)
-                if 'memory' in device:
-                    mem = device['memory']
-                    if 'system' in mem and isinstance(mem['system'], dict):
-                        used = mem['system'].get('used', 0)
-                        total = mem['system'].get('total', 0)
-                        if used or total:
-                            gpu_stats['gpu_smem_used_mb'] = round(used / (1024 * 1024), 2)
-                            gpu_stats['gpu_smem_total_mb'] = round(total / (1024 * 1024), 2)
-                    if 'device' in mem and isinstance(mem['device'], dict):
-                        used = mem['device'].get('used', 0)
-                        total = mem['device'].get('total', 0)
-                        if used or total:
-                            gpu_stats['gpu_vram_used_mb'] = round(used / (1024 * 1024), 2)
-                            gpu_stats['gpu_vram_total_mb'] = round(total / (1024 * 1024), 2)
+        # Get dev_stats which contains the actual metrics
+        dev_stats = device.get('dev_stats', {})
 
-                # Engine utilization
-                if 'engines' in device and isinstance(device['engines'], dict):
-                    total_util = 0
-                    engine_count = 0
-                    for engine_name, engine_data in device['engines'].items():
-                        if isinstance(engine_data, dict) and 'busy' in engine_data:
-                            busy = engine_data['busy']
-                            total_util += busy
-                            engine_count += 1
-                            # Store individual engine stats
-                            clean_name = engine_name.replace('/', '_').replace('-', '_').replace(' ', '_').lower()
-                            gpu_stats[f'gpu_engine_{clean_name}_pct'] = round(busy, 2)
+        # Memory usage (values in bytes, convert to MB)
+        mem_info = dev_stats.get('mem_info', [])
+        if mem_info and len(mem_info) > 0:
+            mem = mem_info[0]  # Get latest/first entry
+            smem_total = mem.get('smem_total', 0)
+            smem_used = mem.get('smem_used', 0)
+            vram_total = mem.get('vram_total', 0)
+            vram_used = mem.get('vram_used', 0)
 
-                    if engine_count > 0:
-                        gpu_stats['gpu_engines_avg_pct'] = round(total_util / engine_count, 2)
+            if smem_total or smem_used:
+                gpu_stats['gpu_smem_used_mb'] = round(smem_used / (1024 * 1024), 2)
+                gpu_stats['gpu_smem_total_mb'] = round(smem_total / (1024 * 1024), 2)
+            if vram_total or vram_used:
+                gpu_stats['gpu_vram_used_mb'] = round(vram_used / (1024 * 1024), 2)
+                gpu_stats['gpu_vram_total_mb'] = round(vram_total / (1024 * 1024), 2)
 
-                # Frequency (values in MHz)
-                if 'frequencies' in device and isinstance(device['frequencies'], dict):
-                    freq = device['frequencies']
-                    if 'actual' in freq:
-                        gpu_stats['gpu_freq_actual_mhz'] = freq['actual']
-                    if 'requested' in freq:
-                        gpu_stats['gpu_freq_requested_mhz'] = freq['requested']
-                    if 'max' in freq:
-                        gpu_stats['gpu_freq_max_mhz'] = freq['max']
-                    if 'min' in freq:
-                        gpu_stats['gpu_freq_min_mhz'] = freq['min']
+        # Engine utilization (eng_usage is dict with engine names as keys, values are arrays)
+        eng_usage = dev_stats.get('eng_usage', {})
+        if eng_usage:
+            total_util = 0
+            engine_count = 0
+            for engine_name, usage_array in eng_usage.items():
+                if isinstance(usage_array, list) and len(usage_array) > 0:
+                    usage = usage_array[0]  # Get latest value
+                    if isinstance(usage, (int, float)):
+                        total_util += usage
+                        engine_count += 1
+                        clean_name = engine_name.replace('/', '_').replace('-', '_').replace(' ', '_').lower()
+                        gpu_stats[f'gpu_engine_{clean_name}_pct'] = round(usage, 2)
 
-                # Power (values in Watts)
-                if 'power' in device and isinstance(device['power'], dict):
-                    pwr = device['power']
-                    if 'gpu' in pwr:
-                        gpu_stats['gpu_power_w'] = round(pwr['gpu'], 2)
-                    if 'package' in pwr:
-                        gpu_stats['gpu_package_power_w'] = round(pwr['package'], 2)
+            if engine_count > 0:
+                gpu_stats['gpu_engines_avg_pct'] = round(total_util / engine_count, 2)
 
-                # Temperature (values in Celsius)
-                if 'temperature' in device and isinstance(device['temperature'], dict):
-                    for temp_name, temp_val in device['temperature'].items():
-                        if isinstance(temp_val, (int, float)):
-                            clean_name = temp_name.replace('-', '_').replace(' ', '_').lower()
-                            gpu_stats[f'gpu_temp_{clean_name}_c'] = round(temp_val, 1)
+        # Frequency (freqs is nested array: freqs[timestamp_idx][gt_idx])
+        freqs = dev_stats.get('freqs', [])
+        if freqs and len(freqs) > 0:
+            freq_list = freqs[0]  # Get latest timestamp
+            if freq_list and len(freq_list) > 0:
+                freq = freq_list[0]  # Get first GT (usually main GPU)
+                if isinstance(freq, dict):
+                    if 'act_freq' in freq:
+                        gpu_stats['gpu_freq_actual_mhz'] = freq['act_freq']
+                    if 'cur_freq' in freq:
+                        gpu_stats['gpu_freq_requested_mhz'] = freq['cur_freq']
+                    if 'max_freq' in freq:
+                        gpu_stats['gpu_freq_max_mhz'] = freq['max_freq']
+                    if 'min_freq' in freq:
+                        gpu_stats['gpu_freq_min_mhz'] = freq['min_freq']
 
-                # Fan speeds (values in RPM)
-                if 'fans' in device and isinstance(device['fans'], dict):
-                    for fan_name, fan_val in device['fans'].items():
-                        if isinstance(fan_val, (int, float)):
-                            clean_name = fan_name.replace('-', '_').replace(' ', '_').lower()
-                            gpu_stats[f'gpu_fan_{clean_name}_rpm'] = int(fan_val)
+        # Power (power is array of dicts)
+        power = dev_stats.get('power', [])
+        if power and len(power) > 0:
+            pwr = power[0]  # Get latest
+            if isinstance(pwr, dict):
+                if 'gpu_cur_power' in pwr:
+                    gpu_stats['gpu_power_w'] = round(pwr['gpu_cur_power'], 2)
+                if 'pkg_cur_power' in pwr:
+                    gpu_stats['gpu_package_power_w'] = round(pwr['pkg_cur_power'], 2)
+
+        # Temperature (temps is array)
+        temps = dev_stats.get('temps', [])
+        if temps and len(temps) > 0:
+            for i, temp_val in enumerate(temps):
+                if isinstance(temp_val, (int, float)):
+                    gpu_stats[f'gpu_temp_{i}_c'] = round(temp_val, 1)
+
+        # Fan speeds (fans is array)
+        fans = dev_stats.get('fans', [])
+        if fans and len(fans) > 0:
+            for i, fan_val in enumerate(fans):
+                if isinstance(fan_val, (int, float)):
+                    gpu_stats[f'gpu_fan_{i}_rpm'] = int(fan_val)
 
         # Clean up temp file
         try:
@@ -213,19 +249,26 @@ def monitor(output_file="system_metrics.csv", interval=0.5, use_qmassa=True, run
         qmassa_path = shutil.which("qmassa")
         if qmassa_path:
             print(f"✅ qmassa found at: {qmassa_path}")
-            # Check if we can run with sudo -n (non-interactive)
-            sudo_check = subprocess.run(
-                ["sudo", "-n", "true"],
-                capture_output=True
-            )
-            if sudo_check.returncode == 0:
-                print("✅ sudo access available (passwordless)")
+            # Check if running as root or have sudo access
+            is_root = os.geteuid() == 0
+            if is_root:
+                print("✅ Running as root - full GPU access")
                 gpu_temp_file = os.path.join(tempfile.gettempdir(), f"qmassa_{os.getpid()}.json")
                 has_gpu_monitor = True
             else:
-                print("⚠️  sudo requires password - run with: sudo python3 monitor_linux_backup.py")
-                print("⚠️  Or configure passwordless sudo for qmassa")
-                print("⚠️  GPU monitoring disabled")
+                # Check if we can run with sudo -n (non-interactive)
+                sudo_check = subprocess.run(
+                    ["sudo", "-n", "true"],
+                    capture_output=True
+                )
+                if sudo_check.returncode == 0:
+                    print("✅ sudo access available (passwordless)")
+                    gpu_temp_file = os.path.join(tempfile.gettempdir(), f"qmassa_{os.getpid()}.json")
+                    has_gpu_monitor = True
+                else:
+                    print("⚠️  sudo requires password - run with: sudo python3 monitor_linux_backup.py")
+                    print("⚠️  Or configure passwordless sudo for qmassa")
+                    print("⚠️  GPU monitoring disabled")
         else:
             print("⚠️  qmassa not found")
             print("   Install with: cargo install --locked qmassa")
