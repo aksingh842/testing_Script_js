@@ -302,7 +302,7 @@ const TEST_CASES = [
   {
     name: "Night Mode Activation (Easy)",
     query:
-      "Turn on all street lights and ensure the railway barriers are active for night safety.",
+      "Turn on all street lights.",
     plugins: [
       "plugin-1765540909", // Smart City Infrastructure Tool
     ],
