@@ -106,7 +106,7 @@ def get_gpu_stats_qmassa(temp_file):
         # Memory usage (values in bytes, convert to MB)
         mem_info = dev_stats.get('mem_info', [])
         if mem_info and len(mem_info) > 0:
-            mem = mem_info[0]  # Get latest/first entry
+            mem = mem_info[-1]  # Get latest entry (last in array)
             smem_total = mem.get('smem_total', 0)
             smem_used = mem.get('smem_used', 0)
             vram_total = mem.get('vram_total', 0)
@@ -126,7 +126,7 @@ def get_gpu_stats_qmassa(temp_file):
             engine_count = 0
             for engine_name, usage_array in eng_usage.items():
                 if isinstance(usage_array, list) and len(usage_array) > 0:
-                    usage = usage_array[0]  # Get latest value
+                    usage = usage_array[-1]  # Get latest value (last in array)
                     if isinstance(usage, (int, float)):
                         total_util += usage
                         engine_count += 1
@@ -139,7 +139,7 @@ def get_gpu_stats_qmassa(temp_file):
         # Frequency (freqs is nested array: freqs[timestamp_idx][gt_idx])
         freqs = dev_stats.get('freqs', [])
         if freqs and len(freqs) > 0:
-            freq_list = freqs[0]  # Get latest timestamp
+            freq_list = freqs[-1]  # Get latest timestamp (last in array)
             if freq_list and len(freq_list) > 0:
                 freq = freq_list[0]  # Get first GT (usually main GPU)
                 if isinstance(freq, dict):
@@ -155,26 +155,36 @@ def get_gpu_stats_qmassa(temp_file):
         # Power (power is array of dicts)
         power = dev_stats.get('power', [])
         if power and len(power) > 0:
-            pwr = power[0]  # Get latest
+            pwr = power[-1]  # Get latest (last in array)
             if isinstance(pwr, dict):
                 if 'gpu_cur_power' in pwr:
                     gpu_stats['gpu_power_w'] = round(pwr['gpu_cur_power'], 2)
                 if 'pkg_cur_power' in pwr:
                     gpu_stats['gpu_package_power_w'] = round(pwr['pkg_cur_power'], 2)
 
-        # Temperature (temps is array)
+        # Temperature (temps is array - may be nested for multiple iterations)
         temps = dev_stats.get('temps', [])
         if temps and len(temps) > 0:
-            for i, temp_val in enumerate(temps):
-                if isinstance(temp_val, (int, float)):
-                    gpu_stats[f'gpu_temp_{i}_c'] = round(temp_val, 1)
+            # Get latest temps (last entry if nested)
+            temp_data = temps[-1] if isinstance(temps[-1], list) else temps
+            if isinstance(temp_data, list):
+                for i, temp_val in enumerate(temp_data):
+                    if isinstance(temp_val, (int, float)):
+                        gpu_stats[f'gpu_temp_{i}_c'] = round(temp_val, 1)
+            elif isinstance(temp_data, (int, float)):
+                gpu_stats['gpu_temp_0_c'] = round(temp_data, 1)
 
-        # Fan speeds (fans is array)
+        # Fan speeds (fans is array - may be nested for multiple iterations)
         fans = dev_stats.get('fans', [])
         if fans and len(fans) > 0:
-            for i, fan_val in enumerate(fans):
-                if isinstance(fan_val, (int, float)):
-                    gpu_stats[f'gpu_fan_{i}_rpm'] = int(fan_val)
+            # Get latest fans (last entry if nested)
+            fan_data = fans[-1] if isinstance(fans[-1], list) else fans
+            if isinstance(fan_data, list):
+                for i, fan_val in enumerate(fan_data):
+                    if isinstance(fan_val, (int, float)):
+                        gpu_stats[f'gpu_fan_{i}_rpm'] = int(fan_val)
+            elif isinstance(fan_data, (int, float)):
+                gpu_stats['gpu_fan_0_rpm'] = int(fan_data)
 
         # Clean up temp file
         try:
