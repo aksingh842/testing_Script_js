@@ -291,14 +291,14 @@ const TEST_CASES = [
   // },
 
   //IOT TEST CASES
-  // {
-  //   name: "City Environmental Health Check (Easy)",
-  //   query:
-  //     "Get the city's current temperature, humidity, and CO2 concentration to assess the air quality index.",
-  //   plugins: [
-  //     "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
-  //   ],
-  // },
+  {
+    name: "City Environmental Health Check (Easy)",
+    query:
+      "Get the city's current temperature, humidity, and CO2 concentration to assess the air quality index.",
+    plugins: [
+      "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
+    ],
+  },
   {
     name: "Night Mode Activation (Easy)",
     query:
@@ -307,33 +307,32 @@ const TEST_CASES = [
       "plugin-1765540909", // Smart City Infrastructure Tool
     ],
   },
-  // {
-  //   name: "Smart Grid & Resource Report (Medium)",
-  //   query:
-  //     "Get a summary of all sensor data including resource usage, and check the current status of the wind turbines.",
-  //   plugins: [
-  //     "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
-  //     "plugin-1765540909", // Smart City Infrastructure Tool
-  //   ],
-  // },
-  // {
-  //   name: "Emergency Hazard Viz (Medium)",
-  //   query:
-  //     "Get the current CO2 concentration levels. Based on the data, generate a 'City Hazard Warning' infographic image.",
-  //   plugins: [
-  //     "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
-  //     "plugin-1756825179", // Image Generation Tool
-  //   ],
-  // },
-  // {
-  //   name: "Eco-Infrastructure Status (Medium)",
-  //   query:
-  //     "Turn on the wind turbines to maximize energy capture, then fetch the city's humidity and temperature to log operating conditions.",
-  //   plugins: [
-  //     "plugin-1765540909", // Smart City Infrastructure Tool
-  //     "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
-  //   ],
-  // },
+  {
+    name: "Smart Grid & Resource Report (Medium)",
+    query:
+      "Get a summary of resource usage sensor data, and check the current status of the wind turbines.",
+    plugins: [
+      "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
+      "plugin-1765540909", // Smart City Infrastructure Tool
+    ],
+  },
+  {
+    name: "Emergency Hazard Viz (Medium)",
+    query:
+      "Get the current CO2 concentration levels",
+    plugins: [
+      "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
+    ],
+  },
+  {
+    name: "Eco-Infrastructure Status (Medium)",
+    query:
+      "Turn on the wind turbines to maximize energy capture, then fetch the city's humidity and temperature to log operating conditions.",
+    plugins: [
+      "plugin-1765540909", // Smart City Infrastructure Tool
+      "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
+    ],
+  },
   
 
 ];
