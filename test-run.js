@@ -299,14 +299,14 @@ const TEST_CASES = [
   //     "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
   //   ],
   // },
-  // {
-  //   name: "Night Mode Activation (Easy)",
-  //   query:
-  //     "Turn on all street lights and ensure the railway barriers are active for night safety.",
-  //   plugins: [
-  //     "plugin-1765540909", // Smart City Infrastructure Tool
-  //   ],
-  // },
+  {
+    name: "Night Mode Activation (Easy)",
+    query:
+      "Turn on all street lights and ensure the railway barriers are active for night safety.",
+    plugins: [
+      "plugin-1765540909", // Smart City Infrastructure Tool
+    ],
+  },
   // {
   //   name: "Smart Grid & Resource Report (Medium)",
   //   query:
@@ -325,15 +325,17 @@ const TEST_CASES = [
   //     "plugin-1756825179", // Image Generation Tool
   //   ],
   // },
-  {
-    name: "Eco-Infrastructure Status (Medium)",
-    query:
-      "Turn on the wind turbines to maximize energy capture, then fetch the city's humidity and temperature to log operating conditions.",
-    plugins: [
-      "plugin-1765540909", // Smart City Infrastructure Tool
-      "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
-    ],
-  },
+  // {
+  //   name: "Eco-Infrastructure Status (Medium)",
+  //   query:
+  //     "Turn on the wind turbines to maximize energy capture, then fetch the city's humidity and temperature to log operating conditions.",
+  //   plugins: [
+  //     "plugin-1765540909", // Smart City Infrastructure Tool
+  //     "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
+  //   ],
+  // },
+  
+
 ];
 
 // ---------------- TOKEN REFRESH ----------------
