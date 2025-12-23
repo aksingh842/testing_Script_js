@@ -235,7 +235,7 @@ def get_cpu_temperature():
     return None
 
 
-def monitor(output_file="system_metrics.csv", interval=0.5, use_qmassa=True, run_id=""):
+def monitor(output_file="system_metrics.csv", interval=2, use_qmassa=True, run_id=""):
     """
     Monitors system-wide CPU, RAM, GPU, and battery.
 
@@ -445,7 +445,7 @@ Note: Run as root or with passwordless sudo for full GPU stats:
     parser.add_argument(
         "--interval",
         type=float,
-        default=0.5,
+        default=2,
         help="Sampling interval in seconds (default: 0.5)"
     )
     parser.add_argument(
