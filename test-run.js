@@ -619,7 +619,7 @@ return new Promise((resolve) => {
       console.log("\n⏰ Stream timeout - forcing completion");
       response.data.destroy();
       resolve({ success: false, error: "Stream timeout after 5 minutes", fatal: true });
-    }, 300000); // 5 minutes
+    }, 600000); // 5 minutes
   };
   
   setStreamTimeout();
