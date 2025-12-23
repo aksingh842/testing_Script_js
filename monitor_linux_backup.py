@@ -39,10 +39,11 @@ def get_gpu_stats_qmassa(temp_file):
     """
     try:
         # Build command - use sudo only if not already root
+        # Use -n 2 (2 iterations) so qmassa can calculate engine utilization delta
         if os.geteuid() == 0:
-            cmd = ["qmassa", "-x", "-n", "1", "-t", temp_file]
+            cmd = ["qmassa", "-x", "-n", "2", "-m", "500", "-t", temp_file]
         else:
-            cmd = ["sudo", "-n", "qmassa", "-x", "-n", "1", "-t", temp_file]
+            cmd = ["sudo", "-n", "qmassa", "-x", "-n", "2", "-m", "500", "-t", temp_file]
 
         # Run qmassa for a single iteration and save to JSON
         result = subprocess.run(
