@@ -214,15 +214,15 @@ const TEST_CASES = [
   // //     "plugin-1722504304", // Email
   // //   ],
   // // },
-  {
-    name: "Headphones Comparison + Infographic",
-    query:
-      "Search Amazon for best-rated noise-cancelling headphones under $200, then generate a product comparison infographic image.",
-    plugins: [
-      "plugin-1716334779", // Amazon Shopping
-      "plugin-1756825179", // Image Generation
-    ],
-  },
+  // {
+  //   name: "Headphones Comparison + Infographic",
+  //   query:
+  //     "Search Amazon for best-rated noise-cancelling headphones under $200, then generate a product comparison infographic image.",
+  //   plugins: [
+  //     "plugin-1716334779", // Amazon Shopping
+  //     "plugin-1756825179", // Image Generation
+  //   ],
+  // },
   // {
   //   name: "HubSpot CRM + Email",
   //   query:
@@ -281,51 +281,51 @@ const TEST_CASES = [
   //     "plugin-1739264368", // PDF
   //   ],
   // },
-  {
-    name: "Tesla Price Update + Email",
-    query:
-      "Fetch the latest Tesla (TSLA) US stock price and send an email with the details to akhilesh21221@gmail.com.",
-    plugins: [
-      "plugin-1716434059", // US Stock Analysis
-      "plugin-1722285968", // Email Agent
-    ],
-  },
+  // {
+  //   name: "Tesla Price Update + Email",
+  //   query:
+  //     "Fetch the latest Tesla (TSLA) US stock price and send an email with the details to akhilesh21221@gmail.com.",
+  //   plugins: [
+  //     "plugin-1716434059", // US Stock Analysis
+  //     "plugin-1722285968", // Email Agent
+  //   ],
+  // },
 
   //IOT TEST CASES
-  {
-    name: "City Environmental Health Check (Easy)",
-    query:
-      "Get the city's current temperature, humidity, and CO2 concentration to assess the air quality index.",
-    plugins: [
-      "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
-    ],
-  },
-  {
-    name: "Night Mode Activation (Easy)",
-    query:
-      "Turn on all street lights and ensure the railway barriers are active for night safety.",
-    plugins: [
-      "plugin-1765540909", // Smart City Infrastructure Tool
-    ],
-  },
-  {
-    name: "Smart Grid & Resource Report (Medium)",
-    query:
-      "Get a summary of all sensor data including resource usage, and check the current status of the wind turbines.",
-    plugins: [
-      "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
-      "plugin-1765540909", // Smart City Infrastructure Tool
-    ],
-  },
-  {
-    name: "Emergency Hazard Viz (Medium)",
-    query:
-      "Get the current CO2 concentration levels. Based on the data, generate a 'City Hazard Warning' infographic image.",
-    plugins: [
-      "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
-      "plugin-1756825179", // Image Generation Tool
-    ],
-  },
+  // {
+  //   name: "City Environmental Health Check (Easy)",
+  //   query:
+  //     "Get the city's current temperature, humidity, and CO2 concentration to assess the air quality index.",
+  //   plugins: [
+  //     "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
+  //   ],
+  // },
+  // {
+  //   name: "Night Mode Activation (Easy)",
+  //   query:
+  //     "Turn on all street lights and ensure the railway barriers are active for night safety.",
+  //   plugins: [
+  //     "plugin-1765540909", // Smart City Infrastructure Tool
+  //   ],
+  // },
+  // {
+  //   name: "Smart Grid & Resource Report (Medium)",
+  //   query:
+  //     "Get a summary of all sensor data including resource usage, and check the current status of the wind turbines.",
+  //   plugins: [
+  //     "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
+  //     "plugin-1765540909", // Smart City Infrastructure Tool
+  //   ],
+  // },
+  // {
+  //   name: "Emergency Hazard Viz (Medium)",
+  //   query:
+  //     "Get the current CO2 concentration levels. Based on the data, generate a 'City Hazard Warning' infographic image.",
+  //   plugins: [
+  //     "plugin-1765541231", // Smart City IoT Environmental Sensor Tool
+  //     "plugin-1756825179", // Image Generation Tool
+  //   ],
+  // },
   {
     name: "Eco-Infrastructure Status (Medium)",
     query:
@@ -488,7 +488,7 @@ async function sendStream(sessionId, payload, retry = 0) {
       url: API_URL,
       data: payload,
       responseType: "stream",
-      timeout: 300000, // 5 minutes - streaming can take longer
+      timeout: 900000, // 5 minutes - streaming can take longer
       headers: {
         Authorization: `Bearer ${ACCESS_TOKEN}`,
         "Content-Type": "application/json",
@@ -544,10 +544,10 @@ async function runTestCase(test, index) {
   }
 
   const payload = {
-    endpointId: "predefined-openai-gpt4.1",
+    endpointId: "byoi-0fccd8a5-dd0d-4345-b1a5-7b3369437250",
     query: test.query,
     pluginIds: test.plugins,
-    reasoningMode: "gpt-5.1",
+    reasoningMode: "qwen3_4b_ov_8",
     responseMode: "stream",
     debugMode: "on",
     modelConfigs: { temperature: 0.7 },
