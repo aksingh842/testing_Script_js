@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
 """
 Enhanced System Resource Monitor with qmassa GPU Support
-Monitors CPU, Memory, and GPU utilization using qmassa for comprehensive GPU stats.
+Monitors CPU, Memory, Battery, and GPU (via qmassa) for comprehensive system stats.
+
+GPU metrics from qmassa include:
+- Memory (System/VRAM)
+- Engine utilization
+- Frequencies (actual/requested/max)
+- Power (GPU/Package)
+- Temperature
+- Fan speeds
 """
 
 import psutil
@@ -17,28 +25,17 @@ import sys
 import tempfile
 
 
-def get_process_by_name(process_name):
-    """Finds a running process by its name or command line."""
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-        try:
-            if process_name.lower() in proc.info['name'].lower():
-                return proc
-            if proc.info['cmdline'] and any(process_name in s for s in proc.info['cmdline']):
-                return proc
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            pass
-    return None
-
-
 def get_gpu_stats_qmassa(temp_file):
     """
     Capture a single snapshot of GPU stats using qmassa.
 
-    Args:
-        temp_file: Path to temporary JSON file for qmassa output
+    Uses: sudo qmassa -x -n 1 -t <file>
+    - -x: No TUI (headless mode)
+    - -n 1: Single iteration
+    - -t <file>: Save to JSON file
 
     Returns:
-        dict with GPU metrics or None if capture failed
+        tuple: (dict with GPU metrics, error_message or None)
     """
     try:
         # Run qmassa for a single iteration and save to JSON
@@ -46,15 +43,16 @@ def get_gpu_stats_qmassa(temp_file):
             ["sudo", "-n", "qmassa", "-x", "-n", "1", "-t", temp_file],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=10
         )
 
         if result.returncode != 0:
-            return None
+            error_msg = result.stderr.strip() if result.stderr else f"Exit code {result.returncode}"
+            return None, error_msg
 
         # Read and parse the JSON output
         if not os.path.exists(temp_file):
-            return None
+            return None, "qmassa did not create output file"
 
         with open(temp_file, 'r') as f:
             data = json.load(f)
@@ -69,55 +67,77 @@ def get_gpu_stats_qmassa(temp_file):
             if 'devices' in latest and len(latest['devices']) > 0:
                 device = latest['devices'][0]
 
-                # Memory usage
+                # Device info
+                if 'driver' in device:
+                    gpu_stats['gpu_driver'] = device['driver']
+                if 'type' in device:
+                    gpu_stats['gpu_type'] = device['type']
+
+                # Memory usage (values in bytes from qmassa, convert to MB)
                 if 'memory' in device:
                     mem = device['memory']
-                    if 'system' in mem:
-                        gpu_stats['gpu_system_mem_used_mb'] = mem['system'].get('used', 0) / (1024 * 1024)
-                        gpu_stats['gpu_system_mem_total_mb'] = mem['system'].get('total', 0) / (1024 * 1024)
-                    if 'device' in mem:
-                        gpu_stats['gpu_vram_used_mb'] = mem['device'].get('used', 0) / (1024 * 1024)
-                        gpu_stats['gpu_vram_total_mb'] = mem['device'].get('total', 0) / (1024 * 1024)
+                    if 'system' in mem and isinstance(mem['system'], dict):
+                        used = mem['system'].get('used', 0)
+                        total = mem['system'].get('total', 0)
+                        if used or total:
+                            gpu_stats['gpu_smem_used_mb'] = round(used / (1024 * 1024), 2)
+                            gpu_stats['gpu_smem_total_mb'] = round(total / (1024 * 1024), 2)
+                    if 'device' in mem and isinstance(mem['device'], dict):
+                        used = mem['device'].get('used', 0)
+                        total = mem['device'].get('total', 0)
+                        if used or total:
+                            gpu_stats['gpu_vram_used_mb'] = round(used / (1024 * 1024), 2)
+                            gpu_stats['gpu_vram_total_mb'] = round(total / (1024 * 1024), 2)
 
-                # Engine utilization (sum all engines)
-                if 'engines' in device:
+                # Engine utilization
+                if 'engines' in device and isinstance(device['engines'], dict):
                     total_util = 0
                     engine_count = 0
                     for engine_name, engine_data in device['engines'].items():
                         if isinstance(engine_data, dict) and 'busy' in engine_data:
-                            total_util += engine_data['busy']
+                            busy = engine_data['busy']
+                            total_util += busy
                             engine_count += 1
-                            # Also store individual engine stats
-                            clean_name = engine_name.replace('/', '_').lower()
-                            gpu_stats[f'gpu_engine_{clean_name}_percent'] = engine_data['busy']
+                            # Store individual engine stats
+                            clean_name = engine_name.replace('/', '_').replace('-', '_').replace(' ', '_').lower()
+                            gpu_stats[f'gpu_engine_{clean_name}_pct'] = round(busy, 2)
 
                     if engine_count > 0:
-                        gpu_stats['gpu_total_utilization_percent'] = total_util / engine_count
-                    else:
-                        gpu_stats['gpu_total_utilization_percent'] = 0.0
+                        gpu_stats['gpu_engines_avg_pct'] = round(total_util / engine_count, 2)
 
-                # Frequency
-                if 'frequencies' in device:
+                # Frequency (values in MHz)
+                if 'frequencies' in device and isinstance(device['frequencies'], dict):
                     freq = device['frequencies']
-                    if isinstance(freq, dict):
-                        gpu_stats['gpu_freq_actual_mhz'] = freq.get('actual', 0)
-                        gpu_stats['gpu_freq_requested_mhz'] = freq.get('requested', 0)
-                        gpu_stats['gpu_freq_max_mhz'] = freq.get('max', 0)
+                    if 'actual' in freq:
+                        gpu_stats['gpu_freq_actual_mhz'] = freq['actual']
+                    if 'requested' in freq:
+                        gpu_stats['gpu_freq_requested_mhz'] = freq['requested']
+                    if 'max' in freq:
+                        gpu_stats['gpu_freq_max_mhz'] = freq['max']
+                    if 'min' in freq:
+                        gpu_stats['gpu_freq_min_mhz'] = freq['min']
 
-                # Power
-                if 'power' in device:
+                # Power (values in Watts)
+                if 'power' in device and isinstance(device['power'], dict):
                     pwr = device['power']
-                    if isinstance(pwr, dict):
-                        gpu_stats['gpu_power_watts'] = pwr.get('gpu', 0)
-                        gpu_stats['gpu_package_power_watts'] = pwr.get('package', 0)
+                    if 'gpu' in pwr:
+                        gpu_stats['gpu_power_w'] = round(pwr['gpu'], 2)
+                    if 'package' in pwr:
+                        gpu_stats['gpu_package_power_w'] = round(pwr['package'], 2)
 
-                # Temperature
-                if 'temperature' in device:
-                    temps = device['temperature']
-                    if isinstance(temps, dict):
-                        for temp_name, temp_val in temps.items():
-                            clean_name = temp_name.replace('-', '_').lower()
-                            gpu_stats[f'gpu_temp_{clean_name}_c'] = temp_val
+                # Temperature (values in Celsius)
+                if 'temperature' in device and isinstance(device['temperature'], dict):
+                    for temp_name, temp_val in device['temperature'].items():
+                        if isinstance(temp_val, (int, float)):
+                            clean_name = temp_name.replace('-', '_').replace(' ', '_').lower()
+                            gpu_stats[f'gpu_temp_{clean_name}_c'] = round(temp_val, 1)
+
+                # Fan speeds (values in RPM)
+                if 'fans' in device and isinstance(device['fans'], dict):
+                    for fan_name, fan_val in device['fans'].items():
+                        if isinstance(fan_val, (int, float)):
+                            clean_name = fan_name.replace('-', '_').replace(' ', '_').lower()
+                            gpu_stats[f'gpu_fan_{clean_name}_rpm'] = int(fan_val)
 
         # Clean up temp file
         try:
@@ -125,15 +145,52 @@ def get_gpu_stats_qmassa(temp_file):
         except:
             pass
 
-        return gpu_stats if gpu_stats else None
+        return gpu_stats if gpu_stats else None, None
 
-    except (subprocess.TimeoutExpired, subprocess.SubprocessError, json.JSONDecodeError) as e:
-        return None
+    except subprocess.TimeoutExpired:
+        return None, "qmassa timed out"
+    except json.JSONDecodeError as e:
+        return None, f"Failed to parse qmassa JSON: {e}"
+    except Exception as e:
+        return None, str(e)
+
+
+def get_battery_stats():
+    """Get battery metrics using psutil."""
+    stats = {}
+    try:
+        battery = psutil.sensors_battery()
+        if battery:
+            stats['battery_percent'] = round(battery.percent, 1)
+            stats['battery_plugged'] = 1 if battery.power_plugged else 0
+            if battery.secsleft and battery.secsleft != psutil.POWER_TIME_UNLIMITED and battery.secsleft > 0:
+                stats['battery_mins_left'] = round(battery.secsleft / 60, 1)
+    except Exception:
+        pass
+    return stats
+
+
+def get_cpu_temperature():
+    """Get CPU temperature using psutil."""
+    try:
+        temps = psutil.sensors_temperatures()
+        if temps:
+            # Try common CPU temperature sensor names
+            for name in ['coretemp', 'k10temp', 'cpu_thermal', 'acpitz']:
+                if name in temps:
+                    entries = temps[name]
+                    if entries:
+                        # Get the highest/package temperature
+                        max_temp = max(e.current for e in entries)
+                        return round(max_temp, 1)
+    except Exception:
+        pass
+    return None
 
 
 def monitor(output_file="system_metrics.csv", interval=0.5, use_qmassa=True, run_id=""):
     """
-    Monitors system-wide CPU, RAM, and GPU utilization.
+    Monitors system-wide CPU, RAM, GPU, and battery.
 
     Args:
         output_file: CSV file path for output metrics
@@ -141,96 +198,145 @@ def monitor(output_file="system_metrics.csv", interval=0.5, use_qmassa=True, run
         use_qmassa: Whether to use qmassa for GPU monitoring
         run_id: Optional run ID for tagging metrics in the output CSV
     """
-    print(f"📊 Monitoring System-Wide Resources")
+    print("=" * 60)
+    print("📊 System Resource Monitor")
+    print("=" * 60)
     if run_id:
         print(f"🆔 Run ID: {run_id}")
 
-    # --- Check for GPU Monitor ---
+    # --- Check for GPU Monitor (qmassa) ---
     has_gpu_monitor = False
     gpu_temp_file = None
+    qmassa_error_shown = False
 
     if use_qmassa:
         qmassa_path = shutil.which("qmassa")
         if qmassa_path:
-            print("✅ 'qmassa' found. Starting GPU monitoring with qmassa.")
-            # Create temp file for qmassa JSON output
-            gpu_temp_file = os.path.join(tempfile.gettempdir(), f"qmassa_monitor_{os.getpid()}.json")
-            has_gpu_monitor = True
+            print(f"✅ qmassa found at: {qmassa_path}")
+            # Check if we can run with sudo -n (non-interactive)
+            sudo_check = subprocess.run(
+                ["sudo", "-n", "true"],
+                capture_output=True
+            )
+            if sudo_check.returncode == 0:
+                print("✅ sudo access available (passwordless)")
+                gpu_temp_file = os.path.join(tempfile.gettempdir(), f"qmassa_{os.getpid()}.json")
+                has_gpu_monitor = True
+            else:
+                print("⚠️  sudo requires password - run with: sudo python3 monitor_linux_backup.py")
+                print("⚠️  Or configure passwordless sudo for qmassa")
+                print("⚠️  GPU monitoring disabled")
         else:
-            print("⚠️ 'qmassa' not found. Install with: cargo install --locked qmassa")
-            print("⚠️ Monitoring CPU/RAM only.")
+            print("⚠️  qmassa not found")
+            print("   Install with: cargo install --locked qmassa")
+            print("⚠️  GPU monitoring disabled")
+    else:
+        print("ℹ️  GPU monitoring disabled (--no-gpu)")
 
-    # --- Setup CSV Logging ---
-    file_exists = os.path.isfile(output_file)
+    # Check battery
+    battery_stats = get_battery_stats()
+    if battery_stats:
+        print(f"🔋 Battery detected: {battery_stats.get('battery_percent', 'N/A')}%")
+    else:
+        print("ℹ️  No battery detected")
 
-    # Determine CSV headers
-    header = ["run_id", "timestamp", "cpu_percent", "memory_mb"]
+    # Check CPU temperature
+    cpu_temp = get_cpu_temperature()
+    if cpu_temp:
+        print(f"🌡️  CPU temperature sensor available")
 
-    # We'll add GPU columns dynamically on first GPU stats capture
-    gpu_columns_added = False
-    all_gpu_keys = []
+    print(f"📝 Output file: {output_file}")
+    print(f"⏱️  Interval: {interval}s")
+    print("=" * 60)
+    print("Press Ctrl+C to stop monitoring\n")
+
+    # --- CSV Setup ---
+    # We'll write header on first row with all discovered columns
+    first_row = True
+    all_columns = []
 
     try:
-        with open(output_file, 'a', newline='') as f:
-            writer = csv.writer(f)
+        # Initialize CPU measurement (first call returns 0.0)
+        psutil.cpu_percent(interval=None)
 
-            if not file_exists:
-                writer.writerow(header)
+        while True:
+            row = {}
 
-            # Initialize CPU measurement (first call returns 0.0)
-            psutil.cpu_percent(interval=None)
+            # Basic info
+            row['run_id'] = run_id
+            row['timestamp'] = datetime.now().isoformat()
 
-            print(f"📝 Logging to: {output_file}")
-            print("Press Ctrl+C to stop monitoring\n")
+            # CPU
+            row['cpu_percent'] = psutil.cpu_percent(interval=None)
 
-            try:
-                while True:
-                    # 1. Get system-wide CPU and Memory usage
-                    cpu_util = psutil.cpu_percent(interval=None)
-                    mem = psutil.virtual_memory()
-                    mem_mb = mem.used / (1024 * 1024)
+            # Memory
+            mem = psutil.virtual_memory()
+            row['memory_used_mb'] = round(mem.used / (1024 * 1024), 2)
+            row['memory_total_mb'] = round(mem.total / (1024 * 1024), 2)
+            row['memory_percent'] = mem.percent
 
-                    row_data = [run_id, datetime.now().isoformat(), cpu_util, round(mem_mb, 2)]
+            # CPU Temperature
+            cpu_temp = get_cpu_temperature()
+            if cpu_temp:
+                row['cpu_temp_c'] = cpu_temp
 
-                    # 2. Get GPU stats if qmassa is available
-                    if has_gpu_monitor and gpu_temp_file:
-                        gpu_stats = get_gpu_stats_qmassa(gpu_temp_file)
+            # Battery
+            battery = get_battery_stats()
+            row.update(battery)
 
-                        if gpu_stats:
-                            # On first successful GPU capture, update CSV header
-                            if not gpu_columns_added:
-                                all_gpu_keys = sorted(gpu_stats.keys())
-                                header.extend(all_gpu_keys)
+            # GPU stats via qmassa
+            if has_gpu_monitor and gpu_temp_file:
+                gpu_stats, gpu_error = get_gpu_stats_qmassa(gpu_temp_file)
+                if gpu_stats:
+                    row.update(gpu_stats)
+                    qmassa_error_shown = False
+                elif gpu_error and not qmassa_error_shown:
+                    print(f"⚠️  qmassa error: {gpu_error}")
+                    qmassa_error_shown = True
 
-                                # Rewrite header if file is new or recreate with new header
-                                if file_exists:
-                                    # File exists but we need to add GPU columns
-                                    # Just add them to current header for new rows
-                                    pass
-                                else:
-                                    # Rewrite header with GPU columns
-                                    f.seek(0)
-                                    writer.writerow(header)
+            # Write to CSV
+            if first_row:
+                all_columns = list(row.keys())
+                with open(output_file, 'w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=all_columns)
+                    writer.writeheader()
+                    writer.writerow(row)
+                first_row = False
+            else:
+                # Append row, handling new columns gracefully
+                current_keys = set(row.keys())
+                new_keys = current_keys - set(all_columns)
+                if new_keys:
+                    all_columns.extend(sorted(new_keys))
+                    # Rewrite file with new columns (for simplicity, append anyway)
 
-                                gpu_columns_added = True
+                with open(output_file, 'a', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=all_columns, extrasaction='ignore')
+                    writer.writerow(row)
 
-                            # Add GPU values in consistent order
-                            for key in all_gpu_keys:
-                                row_data.append(gpu_stats.get(key, 0.0))
-                        else:
-                            # No GPU stats, append zeros
-                            if gpu_columns_added:
-                                row_data.extend([0.0] * len(all_gpu_keys))
+            # Console output (condensed)
+            gpu_info = ""
+            if 'gpu_power_w' in row:
+                gpu_info = f" | GPU: {row.get('gpu_power_w', 0)}W"
+            if 'gpu_engines_avg_pct' in row:
+                gpu_info += f" {row.get('gpu_engines_avg_pct', 0)}%"
 
-                    # 3. Write data to CSV
-                    writer.writerow(row_data)
-                    f.flush()
+            bat_info = ""
+            if 'battery_percent' in row:
+                plug = "⚡" if row.get('battery_plugged') else "🔋"
+                bat_info = f" | {plug} {row['battery_percent']}%"
 
-                    # Sleep to maintain the desired interval
-                    time.sleep(interval)
+            temp_info = ""
+            if 'cpu_temp_c' in row:
+                temp_info = f" | 🌡️ {row['cpu_temp_c']}°C"
 
-            except KeyboardInterrupt:
-                print("\n✅ Monitoring stopped by user.")
+            print(f"[{row['timestamp'][11:19]}] CPU: {row['cpu_percent']:5.1f}% | RAM: {row['memory_percent']:5.1f}%{temp_info}{gpu_info}{bat_info}")
+
+            time.sleep(interval)
+
+    except KeyboardInterrupt:
+        print("\n✅ Monitoring stopped")
+        print(f"📁 Data saved to: {output_file}")
 
     except IOError as e:
         print(f"❌ Error writing to {output_file}: {e}", file=sys.stderr)
@@ -249,50 +355,66 @@ def monitor(output_file="system_metrics.csv", interval=0.5, use_qmassa=True, run
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Monitor system-wide CPU, RAM, and GPU (via qmassa).",
+        description="Monitor system-wide CPU, RAM, Battery, and GPU (via qmassa).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  # Monitor system with qmassa GPU support
-  python3 monitor_linux_backup.py --out system_metrics.csv
+GPU metrics (via qmassa):
+  - Memory: System memory (SMEM) and Video RAM (VRAM)
+  - Engines: Per-engine and average utilization
+  - Frequencies: Actual, requested, min, max (MHz)
+  - Power: GPU and package power (Watts)
+  - Temperature: GPU temperatures (Celsius)
+  - Fans: Fan speeds (RPM)
 
-  # Monitor with custom interval
+Examples:
+  # Basic monitoring
+  python3 monitor_linux_backup.py
+
+  # With run ID for tagging
+  python3 monitor_linux_backup.py --run-id my_test_run
+
+  # Custom interval (1 second)
   python3 monitor_linux_backup.py --interval 1.0
 
   # Without GPU monitoring
   python3 monitor_linux_backup.py --no-gpu
 
-  # With run ID for tagging
-  python3 monitor_linux_backup.py --run-id my_test_run
+Note: Run as root or with passwordless sudo for full GPU stats:
+  sudo python3 monitor_linux_backup.py --run-id test
         """
     )
     parser.add_argument(
         "--out",
         default="system_metrics.csv",
-        help="Output CSV file name (default: system_metrics.csv)"
+        help="Output CSV file (default: system_metrics.csv)"
     )
     parser.add_argument(
         "--interval",
         type=float,
         default=0.5,
-        help="Monitoring interval in seconds (default: 0.5)"
+        help="Sampling interval in seconds (default: 0.5)"
     )
     parser.add_argument(
         "--no-gpu",
         action="store_true",
-        help="Disable GPU monitoring (CPU/RAM only)"
+        help="Disable GPU monitoring via qmassa"
     )
     parser.add_argument(
         "--run-id",
         type=str,
         default="",
-        help="Run ID for tagging metrics in the output CSV"
+        help="Run ID for tagging metrics in CSV"
     )
 
     args = parser.parse_args()
 
     use_qmassa = not args.no_gpu
-    exit_code = monitor(output_file=args.out, interval=args.interval, use_qmassa=use_qmassa, run_id=args.run_id)
+    exit_code = monitor(
+        output_file=args.out,
+        interval=args.interval,
+        use_qmassa=use_qmassa,
+        run_id=args.run_id
+    )
     sys.exit(exit_code)
 
 
