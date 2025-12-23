@@ -131,36 +131,19 @@ def get_gpu_stats_qmassa(temp_file):
         return None
 
 
-def monitor(target_identifier, output_file="system_metrics.csv", interval=0.5, use_qmassa=True):
+def monitor(output_file="system_metrics.csv", interval=0.5, use_qmassa=True, run_id=""):
     """
-    Monitors CPU, RAM, and GPU utilization for a target process.
+    Monitors system-wide CPU, RAM, and GPU utilization.
 
     Args:
-        target_identifier: PID (int) or process name (str) to monitor
         output_file: CSV file path for output metrics
         interval: Sampling interval in seconds
         use_qmassa: Whether to use qmassa for GPU monitoring
+        run_id: Optional run ID for tagging metrics in the output CSV
     """
-    # --- Find Target Process (CPU/RAM) ---
-    try:
-        pid = int(target_identifier)
-        process = psutil.Process(pid)
-    except ValueError:
-        process = get_process_by_name(target_identifier)
-
-    if not process:
-        print(f"❌ Process '{target_identifier}' not found.", file=sys.stderr)
-        print("Available Python processes:", file=sys.stderr)
-        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-            try:
-                if 'python' in proc.info['name'].lower():
-                    cmdline = ' '.join(proc.info['cmdline'][:3]) if proc.info['cmdline'] else ''
-                    print(f"  PID {proc.info['pid']}: {proc.info['name']} {cmdline}", file=sys.stderr)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-        return 1
-
-    print(f"📊 Monitoring Process: {process.name()} (PID: {process.pid})")
+    print(f"📊 Monitoring System-Wide Resources")
+    if run_id:
+        print(f"🆔 Run ID: {run_id}")
 
     # --- Check for GPU Monitor ---
     has_gpu_monitor = False
@@ -181,7 +164,7 @@ def monitor(target_identifier, output_file="system_metrics.csv", interval=0.5, u
     file_exists = os.path.isfile(output_file)
 
     # Determine CSV headers
-    header = ["timestamp", "cpu_percent", "memory_mb"]
+    header = ["run_id", "timestamp", "cpu_percent", "memory_mb"]
 
     # We'll add GPU columns dynamically on first GPU stats capture
     gpu_columns_added = False
@@ -195,22 +178,19 @@ def monitor(target_identifier, output_file="system_metrics.csv", interval=0.5, u
                 writer.writerow(header)
 
             # Initialize CPU measurement (first call returns 0.0)
-            process.cpu_percent(interval=None)
+            psutil.cpu_percent(interval=None)
 
             print(f"📝 Logging to: {output_file}")
             print("Press Ctrl+C to stop monitoring\n")
 
             try:
                 while True:
-                    # 1. Get CPU and Memory usage from psutil
-                    try:
-                        cpu_util = process.cpu_percent(interval=None)
-                        mem_mb = process.memory_info().rss / (1024 * 1024)
-                    except psutil.NoSuchProcess:
-                        print("\n✅ Target process terminated.")
-                        break
+                    # 1. Get system-wide CPU and Memory usage
+                    cpu_util = psutil.cpu_percent(interval=None)
+                    mem = psutil.virtual_memory()
+                    mem_mb = mem.used / (1024 * 1024)
 
-                    row_data = [datetime.now().isoformat(), cpu_util, round(mem_mb, 2)]
+                    row_data = [run_id, datetime.now().isoformat(), cpu_util, round(mem_mb, 2)]
 
                     # 2. Get GPU stats if qmassa is available
                     if has_gpu_monitor and gpu_temp_file:
@@ -269,23 +249,22 @@ def monitor(target_identifier, output_file="system_metrics.csv", interval=0.5, u
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Monitor CPU, RAM, and GPU (via qmassa) for a process.",
+        description="Monitor system-wide CPU, RAM, and GPU (via qmassa).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Monitor by process name with qmassa
-  python3 monitor.py python --out model_metrics.csv
+  # Monitor system with qmassa GPU support
+  python3 monitor_linux_backup.py --out system_metrics.csv
 
-  # Monitor by PID
-  python3 monitor.py 12345 --out metrics.csv
+  # Monitor with custom interval
+  python3 monitor_linux_backup.py --interval 1.0
 
   # Without GPU monitoring
-  python3 monitor.py python --no-gpu
+  python3 monitor_linux_backup.py --no-gpu
+
+  # With run ID for tagging
+  python3 monitor_linux_backup.py --run-id my_test_run
         """
-    )
-    parser.add_argument(
-        "target",
-        help="PID or unique name of the model process (e.g., 'python', 'uvicorn')"
     )
     parser.add_argument(
         "--out",
@@ -303,11 +282,17 @@ Examples:
         action="store_true",
         help="Disable GPU monitoring (CPU/RAM only)"
     )
+    parser.add_argument(
+        "--run-id",
+        type=str,
+        default="",
+        help="Run ID for tagging metrics in the output CSV"
+    )
 
     args = parser.parse_args()
 
     use_qmassa = not args.no_gpu
-    exit_code = monitor(args.target, output_file=args.out, interval=args.interval, use_qmassa=use_qmassa)
+    exit_code = monitor(output_file=args.out, interval=args.interval, use_qmassa=use_qmassa, run_id=args.run_id)
     sys.exit(exit_code)
 
 

@@ -21,7 +21,6 @@ let COMPANY_ID = process.env.COMPANY_ID || "";
 
 // Model Monitoring Configuration
 const MODEL_TYPE = process.env.MODEL_TYPE || "api"; // "onprem" or "api"
-const MODEL_PROCESS_NAME = process.env.MODEL_PROCESS_NAME || "python";
 
 // Platform detection for monitor script
 const IS_WINDOWS = process.platform === "win32";
@@ -634,54 +633,65 @@ return new Promise((resolve) => {
     // Add to buffer
     dataBuffer += text;
 
-    // Extract answer
-    const answerMatches = [...dataBuffer.matchAll(/data:(\{[^}]*"answer"[^}]*\})/g)];
-    for (const match of answerMatches) {
-      try {
-        const parsed = JSON.parse(match[1]);
-        if (parsed.answer) {
-          process.stdout.write(parsed.answer);
-          finalAnswer += parsed.answer;
-        }
-      } catch (e) {
-        // Silently continue
-      }
-    }
-
-    // Extract metrics - process complete lines only
+    // Extract metrics and answers - process complete lines only
     const lines = dataBuffer.split('\n');
-    
+
     // Keep the last incomplete line in buffer
     dataBuffer = lines.pop() || "";
-    
+
+    // Process each complete line
     for (const line of lines) {
-      if (line.startsWith('data:') && line.includes('"eventType":"metricsLog"')) {
-        try {
-          const jsonStr = line.replace(/^data:/, '').trim();
-          const parsed = JSON.parse(jsonStr);
-          
-          if (parsed.publicMetrics) {
-            const metricData = {
-              eventType: parsed.eventType,
-              sessionId: parsed.sessionId,
-              messageId: parsed.messageId,
-              ...parsed.publicMetrics
-            };
-            
-            allMetrics.push(metricData);
-            console.log("\n📈 Metrics captured:", {
-              inputTokens: metricData.inputTokens,
-              outputTokens: metricData.outputTokens,
-              totalTokens: metricData.totalTokens,
-              totalTimeSec: metricData.totalTimeSec
-            });
-          }
-        } catch (err) {
-          console.log("⚠️ Metric parse error:", err.message);
-          console.log("🔍 Problematic line:", line.substring(0, 100) + "...");
+      if (!line.startsWith('data:')) continue;
+
+      const jsonStr = line.replace(/^data:/, '').trim();
+      if (!jsonStr || jsonStr === '[DONE]') continue;
+
+      try {
+        const parsed = JSON.parse(jsonStr);
+
+        // Extract answer from various possible fields
+        let answerContent = null;
+
+        if (parsed.answer) {
+          answerContent = parsed.answer;
+        } else if (parsed.content) {
+          answerContent = parsed.content;
+        } else if (parsed.text) {
+          answerContent = parsed.text;
+        } else if (parsed.delta?.content) {
+          answerContent = parsed.delta.content;
+        } else if (parsed.choices?.[0]?.delta?.content) {
+          answerContent = parsed.choices[0].delta.content;
+        } else if (parsed.choices?.[0]?.message?.content) {
+          answerContent = parsed.choices[0].message.content;
         }
+
+        if (answerContent) {
+          process.stdout.write(answerContent);
+          finalAnswer += answerContent;
+        }
+
+        // Extract metrics
+        if (parsed.eventType === 'metricsLog' && parsed.publicMetrics) {
+          const metricData = {
+            eventType: parsed.eventType,
+            sessionId: parsed.sessionId,
+            messageId: parsed.messageId,
+            ...parsed.publicMetrics
+          };
+
+          allMetrics.push(metricData);
+          console.log("\n📈 Metrics captured:", {
+            inputTokens: metricData.inputTokens,
+            outputTokens: metricData.outputTokens,
+            totalTokens: metricData.totalTokens,
+            totalTimeSec: metricData.totalTimeSec
+          });
+        }
+      } catch (err) {
+        // Silently continue for unparseable lines
       }
-      
+
       // Check for completion
       if (line.includes('[DONE]')) {
         console.log("\n✅ Stream completed with [DONE] signal");
@@ -703,24 +713,48 @@ return new Promise((resolve) => {
     if (dataBuffer.trim()) {
       const lines = dataBuffer.split('\n');
       for (const line of lines) {
-        if (line.startsWith('data:') && line.includes('"eventType":"metricsLog"')) {
-          try {
-            const jsonStr = line.replace(/^data:/, '').trim();
-            const parsed = JSON.parse(jsonStr);
+        if (!line.startsWith('data:')) continue;
 
-            if (parsed.publicMetrics && allMetrics.length === 0) {
-              const metricData = {
-                eventType: parsed.eventType,
-                sessionId: parsed.sessionId,
-                messageId: parsed.messageId,
-                ...parsed.publicMetrics
-              };
-              allMetrics.push(metricData);
-              console.log("\n📈 Final metrics captured from buffer");
-            }
-          } catch (err) {
-            // Ignore final buffer errors
+        const jsonStr = line.replace(/^data:/, '').trim();
+        if (!jsonStr || jsonStr === '[DONE]') continue;
+
+        try {
+          const parsed = JSON.parse(jsonStr);
+
+          // Extract any remaining answer content
+          let answerContent = null;
+          if (parsed.answer) {
+            answerContent = parsed.answer;
+          } else if (parsed.content) {
+            answerContent = parsed.content;
+          } else if (parsed.text) {
+            answerContent = parsed.text;
+          } else if (parsed.delta?.content) {
+            answerContent = parsed.delta.content;
+          } else if (parsed.choices?.[0]?.delta?.content) {
+            answerContent = parsed.choices[0].delta.content;
+          } else if (parsed.choices?.[0]?.message?.content) {
+            answerContent = parsed.choices[0].message.content;
           }
+
+          if (answerContent) {
+            process.stdout.write(answerContent);
+            finalAnswer += answerContent;
+          }
+
+          // Extract metrics
+          if (parsed.eventType === 'metricsLog' && parsed.publicMetrics && allMetrics.length === 0) {
+            const metricData = {
+              eventType: parsed.eventType,
+              sessionId: parsed.sessionId,
+              messageId: parsed.messageId,
+              ...parsed.publicMetrics
+            };
+            allMetrics.push(metricData);
+            console.log("\n📈 Final metrics captured from buffer");
+          }
+        } catch (err) {
+          // Ignore final buffer errors
         }
       }
     }
@@ -934,15 +968,13 @@ async function runAllTests() {
         shell: true
       });
     } else {
-      // Linux: Use qmassa-based monitor with process targeting
+      // Linux: Use qmassa-based monitor for system-wide metrics
       console.log("\n📊 Starting System Resource Monitor (CPU/Memory/GPU via qmassa)...");
-      console.log(`   Target Process: ${MODEL_PROCESS_NAME}`);
       console.log(`   Run ID: ${RUN_ID}`);
       console.log(`   Metrics File: system_metrics.csv`);
 
       monitorProcess = spawn("python3", [
         "monitor_linux_backup.py",
-        MODEL_PROCESS_NAME,
         "--out",
         "system_metrics.csv",
         "--interval",
