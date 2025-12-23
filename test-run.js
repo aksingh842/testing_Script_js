@@ -547,7 +547,7 @@ async function runTestCase(test, index) {
     endpointId: "byoi-0fccd8a5-dd0d-4345-b1a5-7b3369437250",
     query: test.query,
     pluginIds: test.plugins,
-    reasoningMode: "qwen3_4b_ov_8",
+    reasoningMode: "byor-019b4a29-70a8-7d47-867f-9472f5ca66c9",
     responseMode: "stream",
     debugMode: "on",
     modelConfigs: { temperature: 0.7 },
