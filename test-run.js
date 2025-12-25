@@ -872,7 +872,7 @@ async function runTestCase(test, index, concurrency = 1) {
           const row = {
             runId: RUN_ID,
             testName: test.name,
-            requestNumber: crypto.randomUUID(),
+            requestNumber: index + 1,
             concurrency: concurrency,
             timestamp: new Date().toISOString(),
             sessionId,
