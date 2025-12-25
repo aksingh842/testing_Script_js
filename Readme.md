@@ -38,7 +38,7 @@ Production-ready load testing for AI models with comprehensive system resource m
 
 ### 1. Clone Repository
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/aksingh842/testing_Script_js.git
 cd testing_Script_js
 ```
 
