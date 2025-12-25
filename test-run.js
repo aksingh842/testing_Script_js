@@ -2,6 +2,7 @@ const axios = require("axios");
 const fs = require("fs");
 const { Parser } = require("json2csv");
 const { spawn } = require("child_process");
+const crypto = require("crypto");
 const dotenv = require("dotenv");
 dotenv.config();
 
@@ -18,7 +19,10 @@ const RUN_ID = `run_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
 let ACCESS_TOKEN = process.env.ACCESS_TOKEN || "";
 let REFRESH_TOKEN = process.env.REFRESH_TOKEN || "";
 let COMPANY_ID = process.env.COMPANY_ID || "";
-
+console.log("🔍 ENV LOADED - ACCESS_TOKEN:", ACCESS_TOKEN ? `${ACCESS_TOKEN.substring(0, 20)}...` : "MISSING");
+console.log("🔍 ENV LOADED - REFRESH_TOKEN:", REFRESH_TOKEN ? `${REFRESH_TOKEN.substring(0, 20)}...` : "MISSING");
+console.log("🔍 ENV LOADED - COMPANY_ID:", COMPANY_ID || "MISSING");
+console.log("fetchign env", ACCESS_TOKEN, REFRESH_TOKEN, COMPANY_ID);
 // Model Monitoring Configuration
 const MODEL_TYPE = process.env.MODEL_TYPE || "api"; // "onprem" or "api"
 const MODEL_PROCESS_NAME = process.env.MODEL_PROCESS_NAME || "python";
@@ -340,6 +344,8 @@ const TEST_CASES = [
 // ---------------- TOKEN REFRESH ----------------
 async function refreshToken() {
   console.log("🔄 Refreshing token...");
+  console.log("access token", ACCESS_TOKEN);
+  console.log("refresh token", REFRESH_TOKEN);
   try {
     const res = await axios.post(
       REFRESH_URL,
@@ -357,7 +363,7 @@ async function refreshToken() {
         }
       }
     );
-
+    console.log("response from response for refresh token", res);
     const newToken = res.data?.data?.token;
     const newRefresh = res.data?.data?.refreshToken;
     console.log("response from refresh ", res.data);
@@ -371,7 +377,8 @@ async function refreshToken() {
     console.log("✅ Token refreshed");
     return true;
   } catch (e) {
-    console.error("❌ Token refresh failed:", e.response?.data || e.message);
+    console.log("e ", e);
+    console.error("❌ Token refresh failed:", e.response?.data || e.message, e.response);
     return false;
   }
 }
@@ -458,12 +465,13 @@ async function createSession() {
         headers: {
           Authorization: `Bearer ${ACCESS_TOKEN}`,
           "x-company-id": COMPANY_ID,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
           "Content-Type": "application/json"
         }
       }
     );
-    // console.log("response ", response );
-    // console.log("✅ Session creation response:", response.data);
+    console.log("response ", response);
+    console.log("✅ Session creation response:", response.data);
     const sessionId = response.data?.data?.id;
     console.log("🆕 Session Created:", sessionId);
     return sessionId;
@@ -532,7 +540,7 @@ function detectResponseErrors(response, answer) {
 }
 
 // ---------------- PROCESS TEST CASE ----------------
-async function runTestCase(test, index) {
+async function runTestCase(test, index, concurrency = 1) {
   console.log(`\n=================================`);
   console.log(`🚀 Running Test #${index + 1}: ${test.name}`);
   console.log(`=================================`);
@@ -609,305 +617,307 @@ async function runTestCase(test, index) {
     return { success: false, error: `Request failed: ${errorDetails}`, fatal: true };
   }
 
-return new Promise((resolve) => {
-  let streamTimeout;
-  let dataBuffer = ""; // Buffer for incomplete data
-  
-  // Set a timeout to prevent hanging (e.g., 5 minutes)
-  const setStreamTimeout = () => {
-    if (streamTimeout) clearTimeout(streamTimeout);
-    streamTimeout = setTimeout(() => {
-      console.log("\n⏰ Stream timeout - forcing completion");
-      response.data.destroy();
-      resolve({ success: false, error: "Stream timeout after 5 minutes", fatal: true });
-    }, 300000); // 5 minutes
-  };
-  
-  setStreamTimeout();
+  return new Promise((resolve) => {
+    let streamTimeout;
+    let dataBuffer = ""; // Buffer for incomplete data
 
-  response.data.on("data", (chunk) => {
-    setStreamTimeout(); // Reset timeout on each chunk
-    
-    const text = chunk.toString();
-    fullResponse += text;
-    
-    // Add to buffer
-    dataBuffer += text;
+    // Set a timeout to prevent hanging (e.g., 5 minutes)
+    const setStreamTimeout = () => {
+      if (streamTimeout) clearTimeout(streamTimeout);
+      streamTimeout = setTimeout(() => {
+        console.log("\n⏰ Stream timeout - forcing completion");
+        response.data.destroy();
+        resolve({ success: false, error: "Stream timeout after 5 minutes", fatal: true });
+      }, 300000); // 5 minutes
+    };
 
-    // Extract answer
-    const answerMatches = [...dataBuffer.matchAll(/data:(\{[^}]*"answer"[^}]*\})/g)];
-    for (const match of answerMatches) {
-      try {
-        const parsed = JSON.parse(match[1]);
-        if (parsed.answer) {
-          process.stdout.write(parsed.answer);
-          finalAnswer += parsed.answer;
-        }
-      } catch (e) {
-        // Silently continue
-      }
-    }
+    setStreamTimeout();
 
-    // Extract metrics - process complete lines only
-    const lines = dataBuffer.split('\n');
-    
-    // Keep the last incomplete line in buffer
-    dataBuffer = lines.pop() || "";
-    
-    for (const line of lines) {
-      if (line.startsWith('data:') && line.includes('"eventType":"metricsLog"')) {
+    response.data.on("data", (chunk) => {
+      setStreamTimeout(); // Reset timeout on each chunk
+
+      const text = chunk.toString();
+      fullResponse += text;
+
+      // Add to buffer
+      dataBuffer += text;
+
+      // Extract answer
+      const answerMatches = [...dataBuffer.matchAll(/data:(\{[^}]*"answer"[^}]*\})/g)];
+      for (const match of answerMatches) {
         try {
-          const jsonStr = line.replace(/^data:/, '').trim();
-          const parsed = JSON.parse(jsonStr);
-          
-          if (parsed.publicMetrics) {
-            const metricData = {
-              eventType: parsed.eventType,
-              sessionId: parsed.sessionId,
-              messageId: parsed.messageId,
-              ...parsed.publicMetrics
-            };
-            
-            allMetrics.push(metricData);
-            console.log("\n📈 Metrics captured:", {
-              inputTokens: metricData.inputTokens,
-              outputTokens: metricData.outputTokens,
-              totalTokens: metricData.totalTokens,
-              totalTimeSec: metricData.totalTimeSec
-            });
+          const parsed = JSON.parse(match[1]);
+          if (parsed.answer) {
+            process.stdout.write(parsed.answer);
+            finalAnswer += parsed.answer;
           }
-        } catch (err) {
-          console.log("⚠️ Metric parse error:", err.message);
-          console.log("🔍 Problematic line:", line.substring(0, 100) + "...");
+        } catch (e) {
+          // Silently continue
         }
       }
-      
-      // Check for completion
-      if (line.includes('[DONE]')) {
-        console.log("\n✅ Stream completed with [DONE] signal");
-        clearTimeout(streamTimeout);
-      }
-    }
-  });
 
-  response.data.on("error", (err) => {
-    clearTimeout(streamTimeout);
-    console.error("\n❌ Stream error:", err.message);
-    resolve({ success: false, error: `Stream error: ${err.message}`, fatal: true });
-  });
-
-  response.data.on("end", async () => {
-    clearTimeout(streamTimeout);
-
-    // Process any remaining data in buffer
-    if (dataBuffer.trim()) {
+      // Extract metrics - process complete lines only
       const lines = dataBuffer.split('\n');
+
+      // Keep the last incomplete line in buffer
+      dataBuffer = lines.pop() || "";
+
       for (const line of lines) {
         if (line.startsWith('data:') && line.includes('"eventType":"metricsLog"')) {
           try {
             const jsonStr = line.replace(/^data:/, '').trim();
             const parsed = JSON.parse(jsonStr);
 
-            if (parsed.publicMetrics && allMetrics.length === 0) {
+            if (parsed.publicMetrics) {
               const metricData = {
                 eventType: parsed.eventType,
                 sessionId: parsed.sessionId,
                 messageId: parsed.messageId,
                 ...parsed.publicMetrics
               };
+
               allMetrics.push(metricData);
-              console.log("\n📈 Final metrics captured from buffer");
+              console.log("\n📈 Metrics captured:", {
+                inputTokens: metricData.inputTokens,
+                outputTokens: metricData.outputTokens,
+                totalTokens: metricData.totalTokens,
+                totalTimeSec: metricData.totalTimeSec
+              });
             }
           } catch (err) {
-            // Ignore final buffer errors
+            console.log("⚠️ Metric parse error:", err.message);
+            console.log("🔍 Problematic line:", line.substring(0, 100) + "...");
+          }
+        }
+
+        // Check for completion
+        if (line.includes('[DONE]')) {
+          console.log("\n✅ Stream completed with [DONE] signal");
+          clearTimeout(streamTimeout);
+        }
+      }
+    });
+
+    response.data.on("error", (err) => {
+      clearTimeout(streamTimeout);
+      console.error("\n❌ Stream error:", err.message);
+      resolve({ success: false, error: `Stream error: ${err.message}`, fatal: true });
+    });
+
+    response.data.on("end", async () => {
+      clearTimeout(streamTimeout);
+
+      // Process any remaining data in buffer
+      if (dataBuffer.trim()) {
+        const lines = dataBuffer.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('data:') && line.includes('"eventType":"metricsLog"')) {
+            try {
+              const jsonStr = line.replace(/^data:/, '').trim();
+              const parsed = JSON.parse(jsonStr);
+
+              if (parsed.publicMetrics && allMetrics.length === 0) {
+                const metricData = {
+                  eventType: parsed.eventType,
+                  sessionId: parsed.sessionId,
+                  messageId: parsed.messageId,
+                  ...parsed.publicMetrics
+                };
+                allMetrics.push(metricData);
+                console.log("\n📈 Final metrics captured from buffer");
+              }
+            } catch (err) {
+              // Ignore final buffer errors
+            }
           }
         }
       }
-    }
 
-    // ========== ERROR DETECTION SECTION ==========
+      // ========== ERROR DETECTION SECTION ==========
 
-    // Check for blank/empty response
-    if (!finalAnswer || finalAnswer.trim().length === 0) {
-      console.error("\n❌ FAILURE: Response is blank or empty");
-      console.error("📄 Full response data:", fullResponse.substring(0, 500) + "...");
-      resolve({
-        success: false,
-        error: "Response is blank or empty",
-        fatal: true,
-        sessionId
-      });
-      return;
-    }
-
-    // Check for errors in the response content
-    const detectedErrors = detectResponseErrors(fullResponse, finalAnswer);
-    if (detectedErrors.length > 0) {
-      console.error("\n❌ FAILURE: Errors detected in response");
-      console.error("🔍 Detected errors:", detectedErrors.join(", "));
-      console.error("📄 Response excerpt:", finalAnswer.substring(0, 300) + "...");
-      resolve({
-        success: false,
-        error: `Response contains errors: ${detectedErrors.join(", ")}`,
-        fatal: true,
-        sessionId,
-        detectedErrors
-      });
-      return;
-    }
-
-    console.log(`\n\n✅ Completed: ${test.name}`);
-
-    // Fetch plugin latency stats
-    let pluginStats = [];
-    let ragStats = null;
-    let fulfillmentStats = null;
-
-    if (allMetrics.length > 0 && allMetrics[0].messageId) {
-      const messageId = allMetrics[0].messageId;
-
-      // Fetch plugin stats
-      pluginStats = await fetchPluginStats(sessionId, messageId);
-
-      // Log plugin latencies
-      if (pluginStats.length > 0) {
-        console.log("\n⏱️  Plugin Latencies:");
-        pluginStats.forEach(stat => {
-          console.log(`  - ${stat.pluginId}: ${stat.latencyMs}ms (${stat.success ? '✅' : '❌'})`);
-        });
-      }
-
-      // Fetch RAG and Fulfillment token stats
-      ragStats = await fetchChatStats(sessionId, messageId, "rag_completed");
-      fulfillmentStats = await fetchChatStats(sessionId, messageId, "fulfillment_completed");
-    }
-
-    // webhook
-    if (WEBHOOK_URL) {
-      try {
-        await axios.post(WEBHOOK_URL, {
-          runId: RUN_ID,
-          testName: test.name,
-          sessionId,
-          response: fullResponse,
-          answer: finalAnswer,
-          metrics: allMetrics,
-          pluginStats: pluginStats,
-          ragStats: ragStats,
-          fulfillmentStats: fulfillmentStats
-        });
-        console.log("📤 Webhook sent");
-      } catch (err) {
-        console.error("❌ Webhook failed:", err.message);
-        if (err.response?.status) {
-          console.error("   Status code:", err.response.status);
-        }
+      // Check for blank/empty response
+      if (!finalAnswer || finalAnswer.trim().length === 0) {
+        console.error("\n❌ FAILURE: Response is blank or empty");
+        console.error("📄 Full response data:", fullResponse.substring(0, 500) + "...");
         resolve({
           success: false,
-          error: `Webhook failed: ${err.message}`,
+          error: "Response is blank or empty",
           fatal: true,
           sessionId
         });
         return;
       }
-    } else {
-      console.log("ℹ️ Webhook skipped (WEBHOOK_URL not configured)");
-    }
 
-    // Save metrics to CSV
-    if (allMetrics.length > 0) {
-      const csvFile = 'result.csv';
-      const fileExists = fs.existsSync(csvFile);
-
-      // Combine metrics with plugin stats, RAG stats, and fulfillment stats
-      const csvData = allMetrics.map((m) => {
-        // Calculate plugin latency first
-        let totalPluginLatencySec = 0;
-        if (pluginStats.length > 0) {
-          const totalPluginLatencyMs = pluginStats.reduce((sum, stat) => sum + (stat.latencyMs || 0), 0);
-          totalPluginLatencySec = totalPluginLatencyMs / 1000;
-        }
-
-        const ragTimeSec = ragStats?.totalTimeSec || 0;
-        const fulfillmentTimeSec = fulfillmentStats?.totalTimeSec || 0;
-        const totalTime = ragTimeSec + fulfillmentTimeSec;
-
-        const row = {
-          runId: RUN_ID,
-          testName: test.name,
-          timestamp: new Date().toISOString(),
+      // Check for errors in the response content
+      const detectedErrors = detectResponseErrors(fullResponse, finalAnswer);
+      if (detectedErrors.length > 0) {
+        console.error("\n❌ FAILURE: Errors detected in response");
+        console.error("🔍 Detected errors:", detectedErrors.join(", "));
+        console.error("📄 Response excerpt:", finalAnswer.substring(0, 300) + "...");
+        resolve({
+          success: false,
+          error: `Response contains errors: ${detectedErrors.join(", ")}`,
+          fatal: true,
           sessionId,
-          messageId: m.messageId,
-          answer: finalAnswer,
+          detectedErrors
+        });
+        return;
+      }
 
-          // RAG-specific metrics
-          rag_inputTokens: ragStats?.inputTokens || 0,
-          rag_outputTokens: ragStats?.outputTokens || 0,
-          rag_totalTokens: (ragStats?.inputTokens || 0) + (ragStats?.outputTokens || 0),
-          rag_totalTimeSec: ragTimeSec,
-          rag_endpointId: ragStats?.endpointId || '',
-          rag_reasoningMode: ragStats?.reasoningMode || '',
+      console.log(`\n\n✅ Completed: ${test.name}`);
 
-          // Fulfillment-specific metrics
-          fulfillment_inputTokens: fulfillmentStats?.inputTokens || 0,
-          fulfillment_outputTokens: fulfillmentStats?.outputTokens || 0,
-          fulfillment_totalTokens: (fulfillmentStats?.inputTokens || 0) + (fulfillmentStats?.outputTokens || 0),
-          fulfillment_totalTimeSec: fulfillmentTimeSec,
-          fulfillment_endpointId: fulfillmentStats?.endpointId || '',
+      // Fetch plugin latency stats
+      let pluginStats = [];
+      let ragStats = null;
+      let fulfillmentStats = null;
 
-          // Combined totals
-          total_inputTokens: (ragStats?.inputTokens || 0) + (fulfillmentStats?.inputTokens || 0),
-          total_outputTokens: (ragStats?.outputTokens || 0) + (fulfillmentStats?.outputTokens || 0),
-          total_tokens: (ragStats?.inputTokens || 0) + (ragStats?.outputTokens || 0) +
-                        (fulfillmentStats?.inputTokens || 0) + (fulfillmentStats?.outputTokens || 0),
+      if (allMetrics.length > 0 && allMetrics[0].messageId) {
+        const messageId = allMetrics[0].messageId;
 
-          // Total time (RAG + Fulfillment, includes plugin latency since plugins run during RAG)
-          total_time_sec: totalTime,
+        // Fetch plugin stats
+        pluginStats = await fetchPluginStats(sessionId, messageId);
 
-          // Plugin latency total
-          total_plugin_latency_s: totalPluginLatencySec,
-
-          // Corrected RAG time (RAG time minus plugin latency, since plugins only run during RAG)
-          corrected_rag_time_s: ragTimeSec - totalPluginLatencySec,
-        };
-
-        // Add individual plugin latencies as separate columns
+        // Log plugin latencies
         if (pluginStats.length > 0) {
-          pluginStats.forEach((stat, idx) => {
-            const latencySec = (stat.latencyMs || 0) / 1000;
-            row[`plugin_${idx + 1}_id`] = stat.pluginId;
-            row[`plugin_${idx + 1}_latency_s`] = latencySec;
-            row[`plugin_${idx + 1}_success`] = stat.success;
-            row[`plugin_${idx + 1}_stage`] = stat.stage;
-            row[`plugin_${idx + 1}_executed_at`] = stat.executedAt;
+          console.log("\n⏱️  Plugin Latencies:");
+          pluginStats.forEach(stat => {
+            console.log(`  - ${stat.pluginId}: ${stat.latencyMs}ms (${stat.success ? '✅' : '❌'})`);
           });
         }
 
-        return row;
-      });
-
-      const csv = new Parser().parse(csvData);
-
-      // Append to result.csv (or create if doesn't exist)
-      if (fileExists) {
-        // File exists, append without header
-        const csvWithoutHeader = csv.split('\n').slice(1).join('\n');
-        fs.appendFileSync(csvFile, '\n' + csvWithoutHeader);
-      } else {
-        // File doesn't exist, write with header
-        fs.writeFileSync(csvFile, csv);
+        // Fetch RAG and Fulfillment token stats
+        ragStats = await fetchChatStats(sessionId, messageId, "rag_completed");
+        fulfillmentStats = await fetchChatStats(sessionId, messageId, "fulfillment_completed");
       }
 
-      console.log(`📁 Saved metrics to: ${csvFile}`);
-      console.log(`📝 Answer length: ${finalAnswer.length} characters`);
-    } else {
-      console.log("ℹ️ No metrics found for:", test.name);
-    }
+      // webhook
+      if (WEBHOOK_URL) {
+        try {
+          await axios.post(WEBHOOK_URL, {
+            runId: RUN_ID,
+            testName: test.name,
+            sessionId,
+            response: fullResponse,
+            answer: finalAnswer,
+            metrics: allMetrics,
+            pluginStats: pluginStats,
+            ragStats: ragStats,
+            fulfillmentStats: fulfillmentStats
+          });
+          console.log("📤 Webhook sent");
+        } catch (err) {
+          console.error("❌ Webhook failed:", err.message);
+          if (err.response?.status) {
+            console.error("   Status code:", err.response.status);
+          }
+          resolve({
+            success: false,
+            error: `Webhook failed: ${err.message}`,
+            fatal: true,
+            sessionId
+          });
+          return;
+        }
+      } else {
+        console.log("ℹ️ Webhook skipped (WEBHOOK_URL not configured)");
+      }
 
-    resolve({ success: true, sessionId, answerLength: finalAnswer.length });
+      // Save metrics to CSV
+      if (allMetrics.length > 0) {
+        const csvFile = 'result.csv';
+        const fileExists = fs.existsSync(csvFile);
+
+        // Combine metrics with plugin stats, RAG stats, and fulfillment stats
+        const csvData = allMetrics.map((m) => {
+          // Calculate plugin latency first
+          let totalPluginLatencySec = 0;
+          if (pluginStats.length > 0) {
+            const totalPluginLatencyMs = pluginStats.reduce((sum, stat) => sum + (stat.latencyMs || 0), 0);
+            totalPluginLatencySec = totalPluginLatencyMs / 1000;
+          }
+
+          const ragTimeSec = ragStats?.totalTimeSec || 0;
+          const fulfillmentTimeSec = fulfillmentStats?.totalTimeSec || 0;
+          const totalTime = ragTimeSec + fulfillmentTimeSec;
+
+          const row = {
+            runId: RUN_ID,
+            testName: test.name,
+            requestNumber: crypto.randomUUID(),
+            concurrency: concurrency,
+            timestamp: new Date().toISOString(),
+            sessionId,
+            messageId: m.messageId,
+            answer: finalAnswer,
+
+            // RAG-specific metrics
+            rag_inputTokens: ragStats?.inputTokens || 0,
+            rag_outputTokens: ragStats?.outputTokens || 0,
+            rag_totalTokens: (ragStats?.inputTokens || 0) + (ragStats?.outputTokens || 0),
+            rag_totalTimeSec: ragTimeSec,
+            rag_endpointId: ragStats?.endpointId || '',
+            rag_reasoningMode: ragStats?.reasoningMode || '',
+
+            // Fulfillment-specific metrics
+            fulfillment_inputTokens: fulfillmentStats?.inputTokens || 0,
+            fulfillment_outputTokens: fulfillmentStats?.outputTokens || 0,
+            fulfillment_totalTokens: (fulfillmentStats?.inputTokens || 0) + (fulfillmentStats?.outputTokens || 0),
+            fulfillment_totalTimeSec: fulfillmentTimeSec,
+            fulfillment_endpointId: fulfillmentStats?.endpointId || '',
+
+            // Combined totals
+            total_inputTokens: (ragStats?.inputTokens || 0) + (fulfillmentStats?.inputTokens || 0),
+            total_outputTokens: (ragStats?.outputTokens || 0) + (fulfillmentStats?.outputTokens || 0),
+            total_tokens: (ragStats?.inputTokens || 0) + (ragStats?.outputTokens || 0) +
+              (fulfillmentStats?.inputTokens || 0) + (fulfillmentStats?.outputTokens || 0),
+
+            // Total time (RAG + Fulfillment, includes plugin latency since plugins run during RAG)
+            total_time_sec: totalTime,
+
+            // Plugin latency total
+            total_plugin_latency_s: totalPluginLatencySec,
+
+            // Corrected RAG time (RAG time minus plugin latency, since plugins only run during RAG)
+            corrected_rag_time_s: ragTimeSec - totalPluginLatencySec,
+          };
+
+          // Add individual plugin latencies as separate columns
+          if (pluginStats.length > 0) {
+            pluginStats.forEach((stat, idx) => {
+              const latencySec = (stat.latencyMs || 0) / 1000;
+              row[`plugin_${idx + 1}_id`] = stat.pluginId;
+              row[`plugin_${idx + 1}_latency_s`] = latencySec;
+              row[`plugin_${idx + 1}_success`] = stat.success;
+              row[`plugin_${idx + 1}_stage`] = stat.stage;
+              row[`plugin_${idx + 1}_executed_at`] = stat.executedAt;
+            });
+          }
+
+          return row;
+        });
+
+        const csv = new Parser().parse(csvData);
+
+        // Append to result.csv (or create if doesn't exist)
+        if (fileExists) {
+          // File exists, append without header
+          const csvWithoutHeader = csv.split('\n').slice(1).join('\n');
+          fs.appendFileSync(csvFile, '\n' + csvWithoutHeader);
+        } else {
+          // File doesn't exist, write with header
+          fs.writeFileSync(csvFile, csv);
+        }
+
+        console.log(`📁 Saved metrics to: ${csvFile}`);
+        console.log(`📝 Answer length: ${finalAnswer.length} characters`);
+      } else {
+        console.log("ℹ️ No metrics found for:", test.name);
+      }
+
+      resolve({ success: true, sessionId, answerLength: finalAnswer.length });
+    });
   });
-});
-  
+
 }
 
 // ---------------- TEST SUITE ----------------
@@ -977,7 +987,7 @@ async function runAllTests() {
 
   try {
     for (let i = 0; i < TEST_CASES.length; i++) {
-      const result = await runTestCase(TEST_CASES[i], i);
+      const result = await runTestCase(TEST_CASES[i], i, 1);
 
       // Check result for failures
       if (result && !result.success) {
