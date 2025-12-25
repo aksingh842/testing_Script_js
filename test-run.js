@@ -565,10 +565,16 @@ async function runTestCase(test, index, concurrency = 1) {
   let fullResponse = "";
   let finalAnswer = "";
   let allMetrics = [];
+  let capturedErrors = [];
+
+  let request_start_time = 0;
+  let first_chunk_time = 0;
+  let ttft_ms = 0;
 
   let response;
 
   try {
+    request_start_time = Date.now();
     response = await sendStream(sessionId, payload);
   } catch (err) {
     console.error("❌ Request failed:", err.message);
@@ -636,6 +642,11 @@ async function runTestCase(test, index, concurrency = 1) {
     response.data.on("data", (chunk) => {
       setStreamTimeout(); // Reset timeout on each chunk
 
+      if (first_chunk_time === 0) {
+        first_chunk_time = Date.now();
+        ttft_ms = first_chunk_time - request_start_time;
+      }
+
       const text = chunk.toString();
       fullResponse += text;
 
@@ -663,19 +674,19 @@ async function runTestCase(test, index, concurrency = 1) {
       dataBuffer = lines.pop() || "";
 
       for (const line of lines) {
-        if (line.startsWith('data:') && line.includes('"eventType":"metricsLog"')) {
+        if (line.startsWith('data:')) {
           try {
             const jsonStr = line.replace(/^data:/, '').trim();
             const parsed = JSON.parse(jsonStr);
 
-            if (parsed.publicMetrics) {
+            // metrics
+            if (parsed.eventType === "metricsLog" && parsed.publicMetrics) {
               const metricData = {
                 eventType: parsed.eventType,
                 sessionId: parsed.sessionId,
                 messageId: parsed.messageId,
                 ...parsed.publicMetrics
               };
-
               allMetrics.push(metricData);
               console.log("\n📈 Metrics captured:", {
                 inputTokens: metricData.inputTokens,
@@ -684,9 +695,16 @@ async function runTestCase(test, index, concurrency = 1) {
                 totalTimeSec: metricData.totalTimeSec
               });
             }
+
+            // Check for errors in the payload
+            if (parsed.error) capturedErrors.push(`Error: ${parsed.error}`);
+            if (parsed.rag_error) capturedErrors.push(`RAG Error: ${parsed.rag_error}`);
+            if (parsed.fulfillment_error) capturedErrors.push(`Fulfillment Error: ${parsed.fulfillment_error}`);
+            if (parsed.ragError) capturedErrors.push(`RAG Error: ${parsed.ragError}`);
+            if (parsed.fulfillmentError) capturedErrors.push(`Fulfillment Error: ${parsed.fulfillmentError}`);
+
           } catch (err) {
-            console.log("⚠️ Metric parse error:", err.message);
-            console.log("🔍 Problematic line:", line.substring(0, 100) + "...");
+            // ignore parse errors for non-json lines
           }
         }
 
@@ -734,37 +752,36 @@ async function runTestCase(test, index, concurrency = 1) {
       }
 
       // ========== ERROR DETECTION SECTION ==========
+      let isRunSuccess = true;
+      let failReason = "";
 
       // Check for blank/empty response
       if (!finalAnswer || finalAnswer.trim().length === 0) {
         console.error("\n❌ FAILURE: Response is blank or empty");
         console.error("📄 Full response data:", fullResponse.substring(0, 500) + "...");
-        resolve({
-          success: false,
-          error: "Response is blank or empty",
-          fatal: true,
-          sessionId
-        });
-        return;
+        isRunSuccess = false;
+        failReason = "Response is blank or empty";
+      } else if (capturedErrors.length > 0) {
+        // Check for explicitly captured errors
+        console.error("\n❌ FAILURE: Errors captured in response stream");
+        console.error("🔍 Captured errors:", capturedErrors.join(", "));
+        isRunSuccess = false;
+        failReason = capturedErrors.join("; ");
+      } else {
+        // Check for errors in the response content (regex fallback)
+        const detectedErrors = detectResponseErrors(fullResponse, finalAnswer);
+        if (detectedErrors.length > 0) {
+          console.error("\n❌ FAILURE: Errors detected in response");
+          console.error("🔍 Detected errors:", detectedErrors.join(", "));
+          console.error("📄 Response excerpt:", finalAnswer.substring(0, 300) + "...");
+          isRunSuccess = false;
+          failReason = `Response contains errors: ${detectedErrors.join(", ")}`;
+        }
       }
 
-      // Check for errors in the response content
-      const detectedErrors = detectResponseErrors(fullResponse, finalAnswer);
-      if (detectedErrors.length > 0) {
-        console.error("\n❌ FAILURE: Errors detected in response");
-        console.error("🔍 Detected errors:", detectedErrors.join(", "));
-        console.error("📄 Response excerpt:", finalAnswer.substring(0, 300) + "...");
-        resolve({
-          success: false,
-          error: `Response contains errors: ${detectedErrors.join(", ")}`,
-          fatal: true,
-          sessionId,
-          detectedErrors
-        });
-        return;
+      if (isRunSuccess) {
+        console.log(`\n\n✅ Completed: ${test.name}`);
       }
-
-      console.log(`\n\n✅ Completed: ${test.name}`);
 
       // Fetch plugin latency stats
       let pluginStats = [];
@@ -840,6 +857,18 @@ async function runTestCase(test, index, concurrency = 1) {
           const fulfillmentTimeSec = fulfillmentStats?.totalTimeSec || 0;
           const totalTime = ragTimeSec + fulfillmentTimeSec;
 
+          const corrected_rag_time_s = ragTimeSec - totalPluginLatencySec;
+          const total_outputTokens = (ragStats?.outputTokens || 0) + (fulfillmentStats?.outputTokens || 0);
+          const generation_time = corrected_rag_time_s + fulfillmentTimeSec;
+          const tps = generation_time > 0 ? total_outputTokens / generation_time : 0;
+
+          const expected_tool_count = test.plugins ? test.plugins.length : 0;
+          const actual_tool_count = pluginStats ? pluginStats.length : 0;
+          const tool_calls_ratio = `${actual_tool_count} out of ${expected_tool_count}`;
+
+          const totalPluginLatencyMs = pluginStats.reduce((sum, stat) => sum + (stat.latencyMs || 0), 0);
+          const e2e_latency_ms = ttft_ms + totalPluginLatencyMs;
+
           const row = {
             runId: RUN_ID,
             testName: test.name,
@@ -867,7 +896,7 @@ async function runTestCase(test, index, concurrency = 1) {
 
             // Combined totals
             total_inputTokens: (ragStats?.inputTokens || 0) + (fulfillmentStats?.inputTokens || 0),
-            total_outputTokens: (ragStats?.outputTokens || 0) + (fulfillmentStats?.outputTokens || 0),
+            total_outputTokens: total_outputTokens,
             total_tokens: (ragStats?.inputTokens || 0) + (ragStats?.outputTokens || 0) +
               (fulfillmentStats?.inputTokens || 0) + (fulfillmentStats?.outputTokens || 0),
 
@@ -878,7 +907,13 @@ async function runTestCase(test, index, concurrency = 1) {
             total_plugin_latency_s: totalPluginLatencySec,
 
             // Corrected RAG time (RAG time minus plugin latency, since plugins only run during RAG)
-            corrected_rag_time_s: ragTimeSec - totalPluginLatencySec,
+            corrected_rag_time_s: corrected_rag_time_s,
+            ttft_ms: ttft_ms,
+            tps: tps,
+            tool_calls: tool_calls_ratio,
+            e2e_latency_ms: e2e_latency_ms,
+            success: isRunSuccess,
+            failure_reason: failReason,
           };
 
           // Add individual plugin latencies as separate columns
@@ -914,7 +949,16 @@ async function runTestCase(test, index, concurrency = 1) {
         console.log("ℹ️ No metrics found for:", test.name);
       }
 
-      resolve({ success: true, sessionId, answerLength: finalAnswer.length });
+      if (!isRunSuccess) {
+        resolve({
+          success: false,
+          error: failReason,
+          fatal: true,
+          sessionId
+        });
+      } else {
+        resolve({ success: true, sessionId, answerLength: finalAnswer.length });
+      }
     });
   });
 
